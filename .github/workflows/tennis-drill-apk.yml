@@ -1,9 +1,9 @@
-name: Build Tennis Drill V3 APK
+name: Build Tennis Drill V3.1 APK
 
 on:
   push:
     branches:
-      - chatgpt/tennis-drill-v3
+      - chatgpt/tennis-drill-v3-1
     paths:
       - "TennisDrillV1/**"
       - ".github/workflows/tennis-drill-apk.yml"
@@ -32,11 +32,11 @@ jobs:
         run: gradle assembleDebug --stacktrace
 
       - name: Rename APK
-        run: cp TennisDrillV1/app/build/outputs/apk/debug/app-debug.apk TennisDrill-V3-debug.apk
+        run: cp TennisDrillV1/app/build/outputs/apk/debug/app-debug.apk TennisDrill-V3.1-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TennisDrill-V3-APK
-          path: TennisDrill-V3-debug.apk
+          name: TennisDrill-V3.1-APK
+          path: TennisDrill-V3.1-debug.apk
           retention-days: 30
