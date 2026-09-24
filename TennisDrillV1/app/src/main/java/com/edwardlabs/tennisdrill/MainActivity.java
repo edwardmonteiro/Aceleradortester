@@ -67,14 +67,14 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     void buildUi(){
         ScrollView scroll=new ScrollView(this); scroll.setFillViewport(true); scroll.setBackgroundColor(BG); scroll.setFitsSystemWindows(true);
-        LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(20),dp(16),dp(20),dp(36));
+        LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(18),dp(18),dp(18),dp(38));
         scroll.addView(root,new ScrollView.LayoutParams(-1,-2));
 
-        root.addView(tv("TENNIS DRILL  V3.1",13,MUTED,true));
-        root.addView(tv("Learn your forehand shape.",30,TEXT,true));
-        root.addView(tv("Phone only • shadow reference • hands-free sets",14,MUTED,false));
+        root.addView(tv("TENNIS DRILL  V3.3",12,MUTED,true));
+        root.addView(tv("Shadow Forehand",32,TEXT,true));
+        root.addView(tv("Move. Compare. Learn.",15,MUTED,false));
 
-        TextView safety=tv("Hold the phone securely with the screen facing you. Clear the area before swinging.",12,MUTED,false);
+        TextView safety=tv("Screen toward you • secure grip • clear the area",11,MUTED,false);
         safety.setPadding(0,dp(8),0,0); root.addView(safety);
 
         root.addView(space(18));
@@ -90,22 +90,22 @@ public class MainActivity extends Activity implements SensorEventListener {
         primary=button("START CALIBRATION",true); primary.setOnClickListener(v->onPrimary()); root.addView(primary);
 
         root.addView(space(14));
-        readyState=tv("READY STATE • not armed",14,MUTED,true); root.addView(card(readyState));
+        readyState=tv("●  READY  not armed",14,MUTED,true); readyState.setGravity(Gravity.CENTER); root.addView(chip(readyState));
         root.addView(space(10));
-        live=tv("Checking motion sensors…",13,MUTED,false); root.addView(live);
+        live=tv("Sensors checking…",11,MUTED,false); live.setGravity(Gravity.CENTER); root.addView(live);
 
         root.addView(space(18));
-        repCounter=tv("0 / 3 REFERENCE SWINGS",18,TEXT,true); root.addView(card(repCounter));
+        repCounter=tv("0 / 3  REFERENCE",17,TEXT,true); repCounter.setGravity(Gravity.CENTER); root.addView(card(repCounter));
 
         root.addView(space(14));
         learnHint=tv("REFERENCE SHADOW",12,MUTED,true); root.addView(learnHint);
-        shadowView=new ShadowView(this); shadowView.setBackgroundColor(SURFACE);
-        root.addView(shadowView,new LinearLayout.LayoutParams(-1,dp(310)));
+        shadowView=new ShadowView(this); shadowView.setBackground(roundRect(SURFACE,18,LINE,1));
+        root.addView(shadowView,new LinearLayout.LayoutParams(-1,dp(300)));
 
         root.addView(space(16));
         root.addView(tv("FORWARD ↔ UPWARD",12,MUTED,true));
-        balanceView=new MotionBalanceView(this); balanceView.setBackgroundColor(SURFACE);
-        root.addView(balanceView,new LinearLayout.LayoutParams(-1,dp(180)));
+        balanceView=new MotionBalanceView(this); balanceView.setBackground(roundRect(SURFACE,18,LINE,1));
+        root.addView(balanceView,new LinearLayout.LayoutParams(-1,dp(158)));
 
         root.addView(space(16));
         root.addView(tv("LATEST SWING",12,MUTED,true));
@@ -113,11 +113,11 @@ public class MainActivity extends Activity implements SensorEventListener {
 
         root.addView(space(16));
         root.addView(tv("ONE THING TO LEARN",12,MUTED,true));
-        coach=tv("Complete calibration first.",19,ACCENT,true); coach.setPadding(0,dp(6),0,0); root.addView(coach);
+        coach=tv("Complete calibration first.",18,ACCENT,true); coach.setPadding(0,dp(6),0,0); root.addView(coach);
 
         root.addView(space(18));
         root.addView(tv("SESSION",12,MUTED,true));
-        session=tv("The first 3 slow forehands create your central shadow reference.",14,MUTED,false); root.addView(session);
+        session=tv("3 slow forehands create your personal shadow.",14,MUTED,false); root.addView(session);
 
         setContentView(scroll);
     }
@@ -149,36 +149,36 @@ public class MainActivity extends Activity implements SensorEventListener {
         stageLabel.setText("STEP 2 OF 3"); title.setText("Teach me 3 slow forehands");
         instruction.setText("Do 3 complete slow forehands. After each finish, return to the same ready position. The app waits for ready before accepting the next swing.");
         primary.setText("START 3 REFERENCE SWINGS"); primary.setEnabled(true); primary.setAlpha(1f);
-        repCounter.setText("0 / 3 REFERENCE SWINGS");
+        repCounter.setText("0 / 3  REFERENCE");
         coach.setText("Watch the line: each swing builds your central shadow.");
     }
 
     void startReferenceSet(){
         references.clear(); referenceCount=0; practiceCount=0; latest=null; referenceX=null; referenceY=null;
-        current.clear(); seriesArmed=true; recording=false; waitingForReady=true; readyStableStart=0; stage=Stage.LEARN; readyState.setText("SETTLE IN YOUR NATURAL READY…"); readyState.setTextColor(MUTED);
+        current.clear(); seriesArmed=true; recording=false; waitingForReady=true; readyStableStart=0; stage=Stage.LEARN; readyState.setText("●  SETTLE INTO READY"); readyState.setTextColor(MUTED);
         primary.setEnabled(false); primary.setAlpha(.45f); primary.setText("LISTENING…");
         title.setText("Return to READY first"); instruction.setText("When ready is stable, the app arms automatically. Then perform one full slow forehand.");
-        repCounter.setText("0 / 3 REFERENCE SWINGS"); coach.setText("Ready → takeback → accelerate → finish → ready.");
+        repCounter.setText("0 / 3  REFERENCE"); coach.setText("Ready → takeback → accelerate → finish → ready.");
         shadowView.resetAll(); balanceView.setMetrics(null,null);
     }
 
     void startPracticeSet(){
         practice.clear(); practiceCount=0; latest=null; current.clear();
-        seriesArmed=true; recording=false; waitingForReady=true; readyStableStart=0; stage=Stage.PRACTICE; readyState.setText("SETTLE IN YOUR NATURAL READY…"); readyState.setTextColor(MUTED);
+        seriesArmed=true; recording=false; waitingForReady=true; readyStableStart=0; stage=Stage.PRACTICE; readyState.setText("●  SETTLE INTO READY"); readyState.setTextColor(MUTED);
         stageLabel.setText("STEP 3 OF 3"); title.setText("Return to READY");
         instruction.setText("Do 10 natural forehands. Your live line is drawn over the central reference.");
         primary.setEnabled(false); primary.setAlpha(.45f); primary.setText("SET IN PROGRESS");
-        repCounter.setText("0 / 10 PRACTICE SWINGS");
+        repCounter.setText("0 / 10  TRAINING");
         coach.setText("Match the shape first. Then explore forward versus upward motion.");
         shadowView.startPractice(referenceX,referenceY); balanceView.setMetrics(null,referenceProfile);
     }
 
     void resetPractice(){
-        practice.clear(); practiceCount=0; latest=null; stage=Stage.READY; seriesArmed=false; readyState.setText("READY STATE • not armed"); readyState.setTextColor(MUTED);
+        practice.clear(); practiceCount=0; latest=null; stage=Stage.READY; seriesArmed=false; readyState.setText("●  READY  not armed"); readyState.setTextColor(MUTED);
         primary.setText("START 10-SWING SET"); primary.setEnabled(true); primary.setAlpha(1f);
         stageLabel.setText("STEP 3 OF 3"); title.setText("Reference shadow ready");
         instruction.setText("Start another 10-swing set when ready.");
-        repCounter.setText("0 / 10 PRACTICE SWINGS"); metrics.setText("No new swing recorded.");
+        repCounter.setText("0 / 10  TRAINING"); metrics.setText("No new swing recorded.");
         coach.setText("Try to reproduce your central shadow before changing the motion.");
         session.setText(referenceSummary()); shadowView.startPractice(referenceX,referenceY); balanceView.setMetrics(null,referenceProfile);
     }
@@ -199,7 +199,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         double am=mag(lastA[0]-aBias[0],lastA[1]-aBias[1],lastA[2]-aBias[2]);
         double gm=mag(lastG[0]-gBias[0],lastG[1]-gBias[1],lastG[2]-gBias[2]);
         double readyAngle=readyAngleDeg();
-        live.setText(String.format(Locale.US,"Motion %.1f m/s²  •  rotation %.1f rad/s  •  ready Δ %.0f°",am,gm,readyAngle));
+        live.setText(recording ? "Capturing motion…" : (waitingForReady ? "Waiting for a stable ready position" : "Ready sensor lock active"));
 
         if(!seriesArmed)return;
         long now=e.timestamp;
@@ -215,17 +215,17 @@ public class MainActivity extends Activity implements SensorEventListener {
                     waitingForReady=false; readyStableStart=0;
                     System.arraycopy(lastR,0,swingBaseR,0,9);
                     current.clear();
-                    readyState.setText("READY LOCKED ✓  —  SWING");
-                    readyState.setTextColor(ACCENT);
+                    readyState.setText("●  READY ✓   SWING");
+                    readyState.setTextColor(ACCENT); pulseReady();
                     title.setText(stage==Stage.LEARN?"READY ✓ — make the reference swing":"READY ✓ — swing "+(practiceCount+1));
                     shadowView.beginLive();
                 }else{
-                    readyState.setText("HOLD READY…");
+                    readyState.setText("●  HOLD READY");
                     readyState.setTextColor(MUTED);
                 }
             }else{
                 readyStableStart=0;
-                readyState.setText("SETTLE IN YOUR NATURAL READY…");
+                readyState.setText("●  SETTLE INTO READY");
                 readyState.setTextColor(MUTED);
             }
             return;
@@ -239,7 +239,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                 recording=true;
                 recordStart=current.isEmpty()?now:current.get(0).t;
                 quietStart=0;
-                readyState.setText("SWINGING…");
+                readyState.setText("●  SWINGING");
                 readyState.setTextColor(TEXT);
                 title.setText(stage==Stage.LEARN?"Reference swing in progress":"Swing "+(practiceCount+1)+" in progress");
             }
@@ -286,7 +286,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     void finishDetectedSwing(){
-        recording=false; quietStart=0; waitingForReady=true; readyStableStart=0; lastSwingEnd=System.nanoTime(); readyState.setText("RETURN TO READY…"); readyState.setTextColor(MUTED);
+        recording=false; quietStart=0; waitingForReady=true; readyStableStart=0; lastSwingEnd=System.nanoTime(); readyState.setText("●  RETURN TO READY"); readyState.setTextColor(MUTED);
         if(current.size()<14){current.clear();title.setText("Too short — return to READY");shadowView.endLive(false);return;}
         Metrics m=analyze(current); current.clear();
         if(m==null){title.setText("Could not analyze — return to READY");shadowView.endLive(false);return;}
@@ -294,7 +294,7 @@ public class MainActivity extends Activity implements SensorEventListener {
 
         if(stage==Stage.LEARN){
             references.add(m); referenceCount++; shadowView.addReference(m.traceX,m.traceY);
-            repCounter.setText(referenceCount+" / 3 REFERENCE SWINGS"); haptic();
+            repCounter.setText(referenceCount+" / 3  REFERENCE"); haptic();
             if(referenceCount>=3){
                 referenceProfile=average(references); buildReferenceTrace();
                 seriesArmed=false; stage=Stage.READY;
@@ -309,7 +309,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             }
         }else if(stage==Stage.PRACTICE){
             practice.add(m); practiceCount++; shadowView.endLive(true);
-            repCounter.setText(practiceCount+" / 10 PRACTICE SWINGS"); coach.setText(coachFor(m)); session.setText(sessionSummary()); haptic();
+            repCounter.setText(practiceCount+" / 10  TRAINING"); coach.setText(coachFor(m)); session.setText(sessionSummary()); haptic();
             if(practiceCount>=10){
                 seriesArmed=false; stage=Stage.COMPLETE; title.setText("Set complete");
                 instruction.setText("Compare the live traces with your central shadow and the Forward / Upward balance.");
@@ -376,7 +376,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             x[j]=(float)pos[idx].z;
             y[j]=(float)pos[idx].y;
         }
-        normalizeTrace(x,y); return new float[][]{x,y};
+        normalizeTrace(x,y); smoothTrace(x,y); return new float[][]{x,y};
     }
 
     void normalizeTrace(float[] x,float[] y){
@@ -385,6 +385,15 @@ public class MainActivity extends Activity implements SensorEventListener {
         for(int i=0;i<x.length;i++){x[i]-=x0;y[i]-=y0;max=Math.max(max,Math.max(Math.abs(x[i]),Math.abs(y[i])));}
         if(max<.001f)max=1;
         for(int i=0;i<x.length;i++){x[i]/=max;y[i]/=max;}
+    }
+
+    void smoothTrace(float[] x,float[] y){
+        if(x==null||x.length<5)return;
+        float[] ox=x.clone(),oy=y.clone();
+        for(int i=2;i<x.length-2;i++){
+            x[i]=(ox[i-2]+2*ox[i-1]+3*ox[i]+2*ox[i+1]+ox[i+2])/9f;
+            y[i]=(oy[i-2]+2*oy[i-1]+3*oy[i]+2*oy[i+1]+oy[i+2])/9f;
+        }
     }
 
     void buildReferenceTrace(){
@@ -443,14 +452,16 @@ public class MainActivity extends Activity implements SensorEventListener {
         if(m.forwardPct>=75)learn="More THROUGH / forward";
         else if(m.upwardPct>=45)learn="More LOW-TO-HIGH / upward";
         else learn="Balanced forward + upward";
+        double match=(referenceX==null)?Double.NaN:100.0-clamp(traceDistance(m.traceX,m.traceY,referenceX,referenceY)*145.0,0,100);
+        String matchText=Double.isNaN(match)?"—":String.format(Locale.US,"%.0f%%",match);
         return String.format(Locale.US,
-            "Tempo              %.2f s\nSwing speed proxy   %.1f km/h\nAngular speed       %.1f rad/s\nForward motion      %.0f%%\nUpward motion       %.0f%%\nSwing path          %+.1f°\nFollow-through      %.0f%%\nSmooth acceleration %.0f%%\nInterpretation      %s",
-            m.duration,m.maxSpeed*3.6,m.maxGyro,m.forwardPct,m.upwardPct,m.pathAngle,m.followRatio*100,m.smoothness,learn);
+            "Shadow match     %s\nForward / Up      %.0f%% / %.0f%%\nSwing path        %+.1f°\nFollow-through    %.0f%%\nSmoothness        %.0f%%\nTempo             %.2f s\n\n%s",
+            matchText,m.forwardPct,m.upwardPct,m.pathAngle,m.followRatio*100,m.smoothness,m.duration,learn);
     }
 
     void updateSensorStatus(){
         boolean ok=lin!=null&&gyro!=null&&rot!=null;
-        live.setText("Sensors • linear accel "+yes(lin!=null)+" • gyro "+yes(gyro!=null)+" • rotation "+yes(rot!=null));
+        live.setText(ok ? "Sensors ready" : "Motion sensor unavailable");
         if(!ok){live.setTextColor(RED);coach.setText("A required motion sensor is missing.");coach.setTextColor(RED);}
     }
 
@@ -480,8 +491,8 @@ public class MainActivity extends Activity implements SensorEventListener {
         @Override protected void onDraw(Canvas c){
             super.onDraw(c); int w=getWidth(),h=getHeight();
             p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));p.setTextSize(dp(11));p.setColor(MUTED);p.setStyle(Paint.Style.FILL);
-            c.drawText(practiceMode?"FORWARD × UPWARD SHADOW + LIVE SWING":"BUILDING FORWARD × UPWARD REFERENCE",dp(14),dp(22),p);
-            RectF box=new RectF(dp(14),dp(36),w-dp(14),h-dp(16));
+            c.drawText(practiceMode?"SHADOW  •  live vs reference":"REFERENCE  •  building your shadow",dp(16),dp(24),p);
+            RectF box=new RectF(dp(16),dp(42),w-dp(16),h-dp(18));
             p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(1));p.setColor(LINE);c.drawRoundRect(box,dp(10),dp(10),p);
             p.setStrokeWidth(dp(1));c.drawLine(box.centerX(),box.top+8,box.centerX(),box.bottom-8,p);c.drawLine(box.left+8,box.centerY(),box.right-8,box.centerY(),p);
 
@@ -496,8 +507,8 @@ public class MainActivity extends Activity implements SensorEventListener {
             if(liveX!=null)drawTrace(c,box,liveX,liveY,ACCENT,dp(4));
 
             p.setStyle(Paint.Style.FILL);p.setTextSize(dp(10));p.setColor(MUTED);
-            c.drawText("START",box.left+dp(10),box.bottom-dp(8),p);
-            c.drawText("FORWARD →",box.right-dp(78),box.centerY()+dp(18),p);
+            c.drawText("START",box.left+dp(10),box.bottom-dp(10),p);
+            c.drawText("FORWARD →",box.right-dp(82),box.centerY()+dp(20),p);
             c.drawText("UP ↑",box.centerX()+dp(8),box.top+dp(16),p);
         }
 
@@ -508,12 +519,17 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
 
         void drawTrace(Canvas c,RectF b,float[] x,float[] y,int color,float width){
-            if(x==null||x.length<2)return;Path path=new Path();
-            for(int i=0;i<x.length;i++){
-                float px=b.centerX()+x[i]*(b.width()*.38f),py=b.centerY()-y[i]*(b.height()*.38f);
-                if(i==0)path.moveTo(px,py);else path.lineTo(px,py);
+            if(x==null||x.length<2)return;
+            float[] px=new float[x.length],py=new float[y.length];
+            for(int i=0;i<x.length;i++){px[i]=b.centerX()+x[i]*(b.width()*.38f);py[i]=b.centerY()-y[i]*(b.height()*.38f);}
+            Path path=new Path(); path.moveTo(px[0],py[0]);
+            for(int i=1;i<px.length;i++){
+                float mx=(px[i-1]+px[i])/2f,my=(py[i-1]+py[i])/2f;
+                path.quadTo(px[i-1],py[i-1],mx,my);
             }
+            path.lineTo(px[px.length-1],py[py.length-1]);
             p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(width);p.setStrokeCap(Paint.Cap.ROUND);p.setStrokeJoin(Paint.Join.ROUND);p.setColor(color);c.drawPath(path,p);
+            p.setStyle(Paint.Style.FILL);p.setColor(color);c.drawCircle(px[0],py[0],dp(3),p);c.drawCircle(px[px.length-1],py[py.length-1],dp(4),p);
         }
     }
 
@@ -524,8 +540,8 @@ public class MainActivity extends Activity implements SensorEventListener {
         @Override protected void onDraw(Canvas c){
             super.onDraw(c);int w=getWidth(),h=getHeight();
             p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));p.setTextSize(dp(12));p.setColor(MUTED);p.setStyle(Paint.Style.FILL);
-            c.drawText("FORWARD = more through   •   UPWARD = more low-to-high",dp(14),dp(22),p);
-            RectF area=new RectF(dp(18),dp(48),w-dp(18),h-dp(30));
+            c.drawText("STROKE INTENT",dp(16),dp(24),p);
+            RectF area=new RectF(dp(18),dp(52),w-dp(18),h-dp(38));
             p.setColor(LINE);c.drawRoundRect(area,dp(10),dp(10),p);
             double f=m!=null?m.forwardPct:(ref!=null?ref.forwardPct:50);
             double u=m!=null?m.upwardPct:(ref!=null?ref.upwardPct:50);
@@ -536,8 +552,8 @@ public class MainActivity extends Activity implements SensorEventListener {
             p.setTextSize(dp(18));p.setColor(TEXT);
             c.drawText(String.format(Locale.US,"%.0f%% FORWARD",f),area.left+dp(12),area.centerY()+dp(6),p);
             String up=String.format(Locale.US,"%.0f%% UP",u);float tw=p.measureText(up);c.drawText(up,area.right-tw-dp(12),area.centerY()+dp(6),p);
-            p.setTextSize(dp(11));p.setColor(MUTED);c.drawText("penetrating / depth tendency",area.left,area.bottom+dp(20),p);
-            String s="spin / arc tendency";tw=p.measureText(s);c.drawText(s,area.right-tw,area.bottom+dp(20),p);
+            p.setTextSize(dp(11));p.setColor(MUTED);c.drawText("FORWARD  •  through / depth tendency",area.left,area.bottom+dp(22),p);
+            String s="UPWARD  •  arc / spin tendency";tw=p.measureText(s);c.drawText(s,area.right-tw,area.bottom+dp(20),p);
         }
     }
 
@@ -561,8 +577,23 @@ public class MainActivity extends Activity implements SensorEventListener {
     float[] mulVec(float[] m,float[] v){return new float[]{m[0]*v[0]+m[1]*v[1]+m[2]*v[2],m[3]*v[0]+m[4]*v[1]+m[5]*v[2],m[6]*v[0]+m[7]*v[1]+m[8]*v[2]};}
     String yes(boolean v){return v?"✓":"—";} double mag(double x,double y,double z){return Math.sqrt(x*x+y*y+z*z);} static double clamp(double v,double a,double b){return Math.max(a,Math.min(b,v));}
 
+    void pulseReady(){
+        readyState.animate().cancel();
+        readyState.setScaleX(1f); readyState.setScaleY(1f); readyState.setAlpha(1f);
+        readyState.animate().scaleX(1.025f).scaleY(1.025f).setDuration(110).withEndAction(
+            ()->readyState.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
+        ).start();
+    }
+
+    GradientDrawable roundRect(int color,int radiusDp,int strokeColor,int strokeDp){
+        GradientDrawable g=new GradientDrawable();
+        g.setColor(color); g.setCornerRadius(dp(radiusDp));
+        if(strokeDp>0)g.setStroke(dp(strokeDp),strokeColor);
+        return g;
+    }
+
     TextView tv(String s,float sp,int color,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(color);v.setLineSpacing(0,1.15f);if(bold)v.setTypeface(v.getTypeface(),Typeface.BOLD);return v;}
-    View card(View child){LinearLayout c=new LinearLayout(this);c.setPadding(dp(16),dp(14),dp(16),dp(14));c.setBackgroundColor(SURFACE);c.addView(child);return c;}
-    Button button(String s,boolean primaryStyle){Button b=new Button(this);b.setText(s);b.setTextSize(15);b.setTypeface(b.getTypeface(),Typeface.BOLD);b.setMinHeight(dp(56));b.setTextColor(primaryStyle?BG:TEXT);GradientDrawable g=new GradientDrawable();g.setCornerRadius(dp(12));g.setColor(primaryStyle?ACCENT:SURFACE);g.setStroke(dp(1),primaryStyle?ACCENT:LINE);b.setBackground(g);return b;}
+    View card(View child){LinearLayout c=new LinearLayout(this);c.setPadding(dp(16),dp(15),dp(16),dp(15));c.setBackground(roundRect(SURFACE,16,LINE,1));c.addView(child);return c;}\n    View chip(View child){LinearLayout c=new LinearLayout(this);c.setPadding(dp(14),dp(12),dp(14),dp(12));c.setBackground(roundRect(SURFACE,999,LINE,1));c.addView(child);return c;}
+    Button button(String s,boolean primaryStyle){Button b=new Button(this);b.setText(s);b.setTextSize(15);b.setTypeface(b.getTypeface(),Typeface.BOLD);b.setMinHeight(dp(56));b.setTextColor(primaryStyle?BG:TEXT);GradientDrawable g=new GradientDrawable();g.setCornerRadius(dp(16));g.setColor(primaryStyle?ACCENT:SURFACE);g.setStroke(dp(1),primaryStyle?ACCENT:LINE);b.setBackground(g);return b;}
     Space space(int d){Space s=new Space(this);s.setLayoutParams(new LinearLayout.LayoutParams(1,dp(d)));return s;}int dp(int v){return(int)(v*getResources().getDisplayMetrics().density+.5f);}
 }
