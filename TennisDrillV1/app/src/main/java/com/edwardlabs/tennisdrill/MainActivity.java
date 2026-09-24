@@ -18,7 +18,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     enum Stage { BASELINE, LEARN, READY, PRACTICE, COMPLETE }
 
     SensorManager sm; Sensor lin, gyro, rot;
-    TextView stageLabel,title,instruction,live,repCounter,metrics,coach,session,learnHint;
+    TextView stageLabel,title,instruction,live,repCounter,metrics,coach,session,learnHint,readyState;
     Button primary;
     ProgressBar progress;
     ShadowView shadowView;
@@ -30,7 +30,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     long baselineStart=0,recordStart=0,quietStart=0,readyStableStart=0,lastSwingEnd=0;
 
     final float[] aBias=new float[3],gBias=new float[3],lastA=new float[3],lastG=new float[3],
-        lastR=new float[9],baseR=new float[9];
+        lastR=new float[9],baseR=new float[9],swingBaseR=new float[9];
     final ArrayList<Sample> current=new ArrayList<>();
     final ArrayList<Metrics> references=new ArrayList<>();
     final ArrayList<Metrics> practice=new ArrayList<>();
@@ -90,6 +90,8 @@ public class MainActivity extends Activity implements SensorEventListener {
         primary=button("START CALIBRATION",true); primary.setOnClickListener(v->onPrimary()); root.addView(primary);
 
         root.addView(space(14));
+        readyState=tv("READY STATE • not armed",14,MUTED,true); root.addView(card(readyState));
+        root.addView(space(10));
         live=tv("Checking motion sensors…",13,MUTED,false); root.addView(live);
 
         root.addView(space(18));
@@ -153,7 +155,7 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     void startReferenceSet(){
         references.clear(); referenceCount=0; practiceCount=0; latest=null; referenceX=null; referenceY=null;
-        current.clear(); seriesArmed=true; recording=false; waitingForReady=true; readyStableStart=0; stage=Stage.LEARN;
+        current.clear(); seriesArmed=true; recording=false; waitingForReady=true; readyStableStart=0; stage=Stage.LEARN; readyState.setText("SETTLE IN YOUR NATURAL READY…"); readyState.setTextColor(MUTED);
         primary.setEnabled(false); primary.setAlpha(.45f); primary.setText("LISTENING…");
         title.setText("Return to READY first"); instruction.setText("When ready is stable, the app arms automatically. Then perform one full slow forehand.");
         repCounter.setText("0 / 3 REFERENCE SWINGS"); coach.setText("Ready → takeback → accelerate → finish → ready.");
@@ -162,7 +164,7 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     void startPracticeSet(){
         practice.clear(); practiceCount=0; latest=null; current.clear();
-        seriesArmed=true; recording=false; waitingForReady=true; readyStableStart=0; stage=Stage.PRACTICE;
+        seriesArmed=true; recording=false; waitingForReady=true; readyStableStart=0; stage=Stage.PRACTICE; readyState.setText("SETTLE IN YOUR NATURAL READY…"); readyState.setTextColor(MUTED);
         stageLabel.setText("STEP 3 OF 3"); title.setText("Return to READY");
         instruction.setText("Do 10 natural forehands. Your live line is drawn over the central reference.");
         primary.setEnabled(false); primary.setAlpha(.45f); primary.setText("SET IN PROGRESS");
@@ -172,7 +174,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     void resetPractice(){
-        practice.clear(); practiceCount=0; latest=null; stage=Stage.READY; seriesArmed=false;
+        practice.clear(); practiceCount=0; latest=null; stage=Stage.READY; seriesArmed=false; readyState.setText("READY STATE • not armed"); readyState.setTextColor(MUTED);
         primary.setText("START 10-SWING SET"); primary.setEnabled(true); primary.setAlpha(1f);
         stageLabel.setText("STEP 3 OF 3"); title.setText("Reference shadow ready");
         instruction.setText("Start another 10-swing set when ready.");
@@ -203,21 +205,42 @@ public class MainActivity extends Activity implements SensorEventListener {
         long now=e.timestamp;
 
         if(waitingForReady){
-            boolean ready=am<0.65 && gm<0.35 && readyAngle<18;
+            // V3.2: READY is a stable resting state, not a precise remembered angle.
+            // Once stable, this exact orientation becomes the local zero for the next swing.
+            boolean ready=am<0.75 && gm<0.42;
             if(ready){
                 if(readyStableStart==0)readyStableStart=now;
-                if(now-readyStableStart>260_000_000L && now-lastSwingEnd>420_000_000L){
+                long held=now-readyStableStart;
+                if(held>340_000_000L && now-lastSwingEnd>520_000_000L){
                     waitingForReady=false; readyStableStart=0;
+                    System.arraycopy(lastR,0,swingBaseR,0,9);
+                    current.clear();
+                    readyState.setText("READY LOCKED ✓  —  SWING");
+                    readyState.setTextColor(ACCENT);
                     title.setText(stage==Stage.LEARN?"READY ✓ — make the reference swing":"READY ✓ — swing "+(practiceCount+1));
                     shadowView.beginLive();
+                }else{
+                    readyState.setText("HOLD READY…");
+                    readyState.setTextColor(MUTED);
                 }
-            }else readyStableStart=0;
+            }else{
+                readyStableStart=0;
+                readyState.setText("SETTLE IN YOUR NATURAL READY…");
+                readyState.setTextColor(MUTED);
+            }
             return;
         }
 
         if(!recording){
-            if(am>1.55 || gm>0.85 || readyAngle>24){
-                recording=true; recordStart=now; quietStart=0; current.clear(); addSample(now);
+            // Keep a short pre-roll after READY so takeback is not cut off.
+            addSample(now);
+            while(current.size()>50) current.remove(0);
+            if(am>1.35 || gm>0.72){
+                recording=true;
+                recordStart=current.isEmpty()?now:current.get(0).t;
+                quietStart=0;
+                readyState.setText("SWINGING…");
+                readyState.setTextColor(TEXT);
                 title.setText(stage==Stage.LEARN?"Reference swing in progress":"Swing "+(practiceCount+1)+" in progress");
             }
         }else{
@@ -234,7 +257,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     double readyAngleDeg(){
-        float[] rel=mulMat(transpose(baseR),lastR);
+        float[] rel=mulMat(transpose(swingBaseR),lastR);
         double trace=rel[0]+rel[4]+rel[8];
         double cos=clamp((trace-1.0)/2.0,-1,1);
         return Math.toDegrees(Math.acos(cos));
@@ -250,18 +273,20 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     float[][] buildLiveTrace(ArrayList<Sample> list){
-        int n=list.size(); if(n<2)return null;
-        int points=Math.min(64,n); float[] x=new float[points],y=new float[points];
-        for(int j=0;j<points;j++){
-            int idx=(int)Math.round(j*(n-1.0)/Math.max(1,points-1));
-            V u=list.get(idx).orient;
-            x[j]=(float)u.x; y[j]=(float)u.y;
+        // Fast live estimate of actual motion path: horizontal axis = forward,
+        // vertical axis = upward. Drift is corrected precisely after the swing ends.
+        int n=list.size(); if(n<3)return null;
+        V[] vel=new V[n]; V[] pos=new V[n]; vel[0]=new V(); pos[0]=new V();
+        for(int i=1;i<n;i++){
+            double dt=clamp((list.get(i).t-list.get(i-1).t)/1e9,.0005,.04);
+            vel[i]=vel[i-1].add(list.get(i-1).a.add(list.get(i).a).mul(.5*dt));
+            pos[i]=pos[i-1].add(vel[i-1].add(vel[i]).mul(.5*dt));
         }
-        normalizeTrace(x,y); return new float[][]{x,y};
+        return traceFromPositions(pos,Math.min(64,n));
     }
 
     void finishDetectedSwing(){
-        recording=false; quietStart=0; waitingForReady=true; readyStableStart=0; lastSwingEnd=System.nanoTime();
+        recording=false; quietStart=0; waitingForReady=true; readyStableStart=0; lastSwingEnd=System.nanoTime(); readyState.setText("RETURN TO READY…"); readyState.setTextColor(MUTED);
         if(current.size()<14){current.clear();title.setText("Too short — return to READY");shadowView.endLive(false);return;}
         Metrics m=analyze(current); current.clear();
         if(m==null){title.setText("Could not analyze — return to READY");shadowView.endLive(false);return;}
@@ -296,8 +321,8 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     Metrics analyze(ArrayList<Sample> in){
         int n=in.size(); double total=(in.get(n-1).t-in.get(0).t)/1e9; if(total<.18)return null;
-        V[] vel=new V[n]; double[] speed=new double[n],gyroM=new double[n],accelM=new double[n];
-        vel[0]=new V(); double maxSpeed=0,maxGyro=0,maxAccel=0; int peakGyroIdx=0;
+        V[] vel=new V[n]; V[] pos=new V[n]; double[] speed=new double[n],gyroM=new double[n],accelM=new double[n];
+        vel[0]=new V(); pos[0]=new V(); double maxSpeed=0,maxGyro=0,maxAccel=0; int peakGyroIdx=0;
 
         for(int i=1;i<n;i++){
             double dt=clamp((in.get(i).t-in.get(i-1).t)/1e9,.0005,.05);
@@ -310,6 +335,10 @@ public class MainActivity extends Activity implements SensorEventListener {
             if(speed[i]>maxSpeed)maxSpeed=speed[i];
             if(gyroM[i]>maxGyro){maxGyro=gyroM[i];peakGyroIdx=i;}
             if(accelM[i]>maxAccel)maxAccel=accelM[i];
+        }
+        for(int i=1;i<n;i++){
+            double dt=clamp((in.get(i).t-in.get(i-1).t)/1e9,.0005,.04);
+            pos[i]=pos[i-1].add(vel[i-1].add(vel[i]).mul(.5*dt));
         }
 
         int first=Math.max(1,(int)(n*.15)),last=Math.min(n-1,(int)(n*.88)),impact=first; double best=-1;
@@ -335,15 +364,17 @@ public class MainActivity extends Activity implements SensorEventListener {
         for(int i=2;i<=peakSpeedIdx;i++){if(speed[i]>=speed[i-1])inc++;comp++;}
         double smoothness=comp==0?0:100.0*inc/comp;
 
-        float[][] trace=traceFromSamples(in,64);
+        float[][] trace=traceFromPositions(pos,64);
         return new Metrics(total,maxSpeed,maxGyro,maxAccel,pathAngle,forwardPct,upwardPct,followRatio,peakOffsetMs,smoothness,impact,speed,trace[0],trace[1]);
     }
 
-    float[][] traceFromSamples(ArrayList<Sample> in,int points){
-        float[] x=new float[points],y=new float[points]; int n=in.size();
+    float[][] traceFromPositions(V[] pos,int points){
+        int n=pos.length; float[] x=new float[points],y=new float[points];
         for(int j=0;j<points;j++){
             int idx=(int)Math.round(j*(n-1.0)/Math.max(1,points-1));
-            V u=in.get(idx).orient; x[j]=(float)u.x; y[j]=(float)u.y;
+            // In our calibrated phone frame: +Z is forward and +Y is upward.
+            x[j]=(float)pos[idx].z;
+            y[j]=(float)pos[idx].y;
         }
         normalizeTrace(x,y); return new float[][]{x,y};
     }
@@ -449,7 +480,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         @Override protected void onDraw(Canvas c){
             super.onDraw(c); int w=getWidth(),h=getHeight();
             p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));p.setTextSize(dp(11));p.setColor(MUTED);p.setStyle(Paint.Style.FILL);
-            c.drawText(practiceMode?"CENTRAL SHADOW + LIVE SWING":"BUILDING YOUR CENTRAL SHADOW",dp(14),dp(22),p);
+            c.drawText(practiceMode?"FORWARD × UPWARD SHADOW + LIVE SWING":"BUILDING FORWARD × UPWARD REFERENCE",dp(14),dp(22),p);
             RectF box=new RectF(dp(14),dp(36),w-dp(14),h-dp(16));
             p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(1));p.setColor(LINE);c.drawRoundRect(box,dp(10),dp(10),p);
             p.setStrokeWidth(dp(1));c.drawLine(box.centerX(),box.top+8,box.centerX(),box.bottom-8,p);c.drawLine(box.left+8,box.centerY(),box.right-8,box.centerY(),p);
@@ -465,8 +496,9 @@ public class MainActivity extends Activity implements SensorEventListener {
             if(liveX!=null)drawTrace(c,box,liveX,liveY,ACCENT,dp(4));
 
             p.setStyle(Paint.Style.FILL);p.setTextSize(dp(10));p.setColor(MUTED);
-            c.drawText("takeback / lateral",box.left+dp(10),box.bottom-dp(8),p);
-            c.drawText("finish / vertical",box.right-dp(92),box.top+dp(16),p);
+            c.drawText("START",box.left+dp(10),box.bottom-dp(8),p);
+            c.drawText("FORWARD →",box.right-dp(78),box.centerY()+dp(18),p);
+            c.drawText("UP ↑",box.centerX()+dp(8),box.top+dp(16),p);
         }
 
         float[][] averageRefs(){
