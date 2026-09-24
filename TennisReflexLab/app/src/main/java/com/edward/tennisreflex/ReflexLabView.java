@@ -44,6 +44,10 @@ public class ReflexLabView extends View implements SensorEventListener {
     private float balanceX,balanceY,precisionX,precisionY;
     private boolean sensorFilterReady;
     private boolean calibrated,neutralReady=true,waitingResponse,currentGo=true,chaosReverse,dailyMode;
+    private boolean sessionCalibrating;
+    private long autoCalibStart,autoStableSince;
+    private float autoRollSum,autoPitchSum;
+    private int autoCalibSamples;
     private long lastGestureAt,gameStart,gameDurationMs,nextPromptAt,promptAt,promptDeadline,stableSince;
     private int currentDir=-1,hits,misses,trials,rallyStreak,rallyBest,rallyLives,chaosRound,dailyIndex,lastScore;
     private double reactionTotal;
@@ -129,8 +133,8 @@ public class ReflexLabView extends View implements SensorEventListener {
         textRight(c,"START",w-pad-dp(18),dp(248),dp(14),BG,true);
 
         calibrateRect.set(pad,dp(286),w-pad,dp(330)); roundRect(c,calibrateRect,PANEL2,dp(14));
-        text(c,calibrated?"CALIBRATED":"CALIBRATE PHONE",pad+dp(16),dp(313),dp(13),calibrated?GREEN:ORANGE,true);
-        textRight(c,calibrated?"TAP TO RESET":"HOLD NATURALLY",w-pad-dp(16),dp(313),dp(11),MUTED,false);
+        text(c,"AUTO-CENTER",pad+dp(16),dp(313),dp(13),GREEN,true);
+        textRight(c,"EVERY DRILL",w-pad-dp(16),dp(313),dp(11),MUTED,false);
 
         text(c,"DRILLS",pad,dp(366),dp(12),MUTED,true);
         float gap=dp(10),top=dp(382),cardW=(w-pad*2-gap)/2f,cardH=dp(92);
@@ -155,16 +159,14 @@ public class ReflexLabView extends View implements SensorEventListener {
 
     private void drawGame(Canvas c,long now){
         float w=getWidth(),pad=dp(20);
-        long remaining=Math.max(0,gameDurationMs-(now-gameStart));
+        long remaining=sessionCalibrating?gameDurationMs:Math.max(0,gameDurationMs-(now-gameStart));
         text(c,"‹  "+gameTitle(game),pad,dp(38),dp(14),TEXT,true);
-        textRight(c,formatTime(remaining),w-pad,dp(38),dp(14),LIME,true);
-        drawProgressBar(c,pad,dp(52),w-pad,dp(58),1f-(remaining/(float)gameDurationMs),LIME);
+        textRight(c,sessionCalibrating?"CAL":formatTime(remaining),w-pad,dp(38),dp(14),sessionCalibrating?ORANGE:LIME,true);
+        drawProgressBar(c,pad,dp(52),w-pad,dp(58),sessionCalibrating?0f:1f-(remaining/(float)gameDurationMs),LIME);
 
-        if(!calibrated){
-            textCentered(c,"CALIBRATION REQUIRED",w/2,dp(120),dp(13),ORANGE,true);
-            textCentered(c,"Hold naturally, then calibrate.",w/2,dp(148),dp(14),MUTED,false);
-            calibrateRect.set(pad,dp(180),w-pad,dp(236)); roundRect(c,calibrateRect,LIME,dp(16));
-            textCentered(c,"CALIBRATE",w/2,dp(215),dp(15),BG,true); return;
+        if(sessionCalibrating){
+            drawAutoCalibration(c,now);
+            return;
         }
         if(remaining<=0){finishTimedGame();return;}
         int gesture=detectGesture(now);
@@ -331,12 +333,83 @@ public class ReflexLabView extends View implements SensorEventListener {
     }
 
     private void startGame(Game g){
-        game=g;screen=Screen.GAME;gameStart=SystemClock.elapsedRealtime();
+        game=g;screen=Screen.GAME;
         gameDurationMs=(g==Game.BALANCE||g==Game.PRECISION)?30000:(g==Game.RALLY?60000:45000);
+
+        // Every drill gets its own neutral reference. This prevents a calibration
+        // made in the hand from shifting the ball when the phone is later placed flat.
+        sessionCalibrating=true;
+        autoCalibStart=SystemClock.elapsedRealtime();
+        autoStableSince=0;
+        autoRollSum=autoPitchSum=0f;
+        autoCalibSamples=0;
+        gameStart=autoCalibStart;
         nextPromptAt=gameStart+900;promptAt=promptDeadline=0;currentDir=-1;waitingResponse=false;
         hits=misses=trials=0;reactionTotal=0;scoreAccumulator=0;scoreFrames=0;maxObservedAccel=0;rallyStreak=rallyBest=0;rallyLives=3;chaosRound=0;chaosReverse=false;stableSince=0;neutralReady=true;lastGestureAt=0;
         balanceX=balanceY=precisionX=precisionY=0f;
         feedbackPulse(18);
+    }
+
+    private void drawAutoCalibration(Canvas c,long now){
+        float w=getWidth();
+
+        // Use gyro + linear acceleration only to decide whether the phone is calm enough
+        // to establish a reliable neutral reference.
+        float gyroMag=(float)Math.sqrt(gx*gx+gy*gy+gz*gz);
+        boolean calm=gyroMag<0.22f && linearMag<0.55f;
+
+        if(calm){
+            if(autoStableSince==0){
+                autoStableSince=now;
+                autoRollSum=autoPitchSum=0f;
+                autoCalibSamples=0;
+            }
+            autoRollSum+=filteredRoll;
+            autoPitchSum+=filteredPitch;
+            autoCalibSamples++;
+        } else {
+            autoStableSince=0;
+            autoRollSum=autoPitchSum=0f;
+            autoCalibSamples=0;
+        }
+
+        long stableMs=autoStableSince==0?0:now-autoStableSince;
+        float progress=clamp(stableMs/900f,0f,1f);
+
+        textCentered(c,"AUTO-CENTER",w/2f,dp(180),dp(16),ORANGE,true);
+        textCentered(c,calibrationInstruction(),w/2f,dp(215),dp(15),TEXT,true);
+
+        circle(c,w/2f,dp(320),dp(74),PANEL2);
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(dp(6));
+        p.setColor(calm?LIME:ORANGE);
+        RectF arc=new RectF(w/2f-dp(58),dp(262),w/2f+dp(58),dp(378));
+        c.drawArc(arc,-90,360f*progress,false,p);
+        p.setStyle(Paint.Style.FILL);
+        circle(c,w/2f,dp(320),dp(12),calm?LIME:ORANGE);
+
+        textCentered(c,calm?"HOLD STILL":"SETTLE PHONE",w/2f,dp(425),dp(20),calm?LIME:ORANGE,true);
+        textCentered(c,"The current position becomes neutral.",w/2f,dp(454),dp(13),MUTED,false);
+
+        if(progress>=1f && autoCalibSamples>10){
+            calibRoll=autoRollSum/autoCalibSamples;
+            calibPitch=autoPitchSum/autoCalibSamples;
+            calibrated=true;
+            sessionCalibrating=false;
+            balanceX=balanceY=precisionX=precisionY=0f;
+            gameStart=now;
+            nextPromptAt=now+900;
+            neutralReady=true;
+            prefs.edit().putBoolean("calibrated",true).putFloat("calibRoll",calibRoll).putFloat("calibPitch",calibPitch).apply();
+            feedbackPulse(28);
+            tone.startTone(ToneGenerator.TONE_PROP_ACK,70);
+        }
+    }
+
+    private String calibrationInstruction(){
+        if(game==Game.SPLIT)return"Hold the phone where you will move.";
+        if(game==Game.REFLEX||game==Game.CHAOS||game==Game.RALLY)return"Hold your natural ready position.";
+        return"Hold the phone in your starting position.";
     }
 
     private void finishTimedGame(){
