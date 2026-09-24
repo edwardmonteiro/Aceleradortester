@@ -22,7 +22,27 @@ public class MainActivity extends Activity implements SensorEventListener {
     int calN=0; final ArrayList<Sample> samples=new ArrayList<>();
 
     @Override public void onCreate(Bundle b){ super.onCreate(b); getWindow().setStatusBarColor(BG); getWindow().setNavigationBarColor(BG); buildUi(); sm=(SensorManager)getSystemService(SENSOR_SERVICE); lin=sm.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION); gyro=sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE); rot=sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR); updateAvailability(); }
-    @Override protected void onResume(){ super.onResume(); if(lin!=null) sm.registerListener(this,lin,SensorManager.SENSOR_DELAY_FASTEST); if(gyro!=null) sm.registerListener(this,gyro,SensorManager.SENSOR_DELAY_FASTEST); if(rot!=null) sm.registerListener(this,rot,SensorManager.SENSOR_DELAY_FASTEST); }
+    @Override protected void onResume(){
+        super.onResume();
+        registerSensorSafely(lin);
+        registerSensorSafely(gyro);
+        registerSensorSafely(rot);
+    }
+    void registerSensorSafely(Sensor sensor){
+        if(sensor==null) return;
+        try{
+            // 5,000 microseconds = 200 Hz. Android 12+ permits this rate
+            // without HIGH_SAMPLING_RATE_SENSORS.
+            boolean ok=sm.registerListener(this,sensor,5000);
+            if(!ok) sm.registerListener(this,sensor,SensorManager.SENSOR_DELAY_GAME);
+        }catch(SecurityException ex){
+            try{ sm.registerListener(this,sensor,SensorManager.SENSOR_DELAY_GAME); }
+            catch(Exception ignored){}
+        }catch(Exception ex){
+            try{ sm.registerListener(this,sensor,SensorManager.SENSOR_DELAY_GAME); }
+            catch(Exception ignored){}
+        }
+    }
     @Override protected void onPause(){ sm.unregisterListener(this); super.onPause(); }
 
     void buildUi(){
