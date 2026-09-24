@@ -64,7 +64,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         else { addSample(now); long elapsed=now-recordStart; boolean quiet=am<1.0&&gm<0.55; if(quiet&&elapsed>450_000_000L){ if(quietStart==0)quietStart=now; if(now-quietStart>320_000_000L)finishSwing(); } else quietStart=0; if(elapsed>2_800_000_000L)finishSwing(); }
     }
     void addSample(long t){
-        float[] rel=mul(transpose(baseR),lastR); float ax=lastA[0]-aBias[0], ay=lastA[1]-aBias[1], az=lastA[2]-aBias[2]; float[] ar=mul(rel,new float[]{ax,ay,az}); float[] gr=mul(rel,new float[]{lastG[0]-gBias[0],lastG[1]-gBias[1],lastG[2]-gBias[2]}); float[] face=mul(rel,new float[]{0,0,-1});
+        float[] rel=mulMat(transpose(baseR),lastR); float ax=lastA[0]-aBias[0], ay=lastA[1]-aBias[1], az=lastA[2]-aBias[2]; float[] ar=mulVec(rel,new float[]{ax,ay,az}); float[] gr=mulVec(rel,new float[]{lastG[0]-gBias[0],lastG[1]-gBias[1],lastG[2]-gBias[2]}); float[] face=mulVec(rel,new float[]{0,0,-1});
         samples.add(new Sample(t,new V(ar[0],ar[1],-ar[2]),new V(gr[0],gr[1],-gr[2]),new V(face[0],face[1],-face[2]).norm()));
     }
     void finishSwing(){ armed=false; recording=false; arm.setText("ARM SWING"); arm.setEnabled(true); if(samples.size()<12){status.setText("Swing too short. Try again.");return;} Result r=analyze(samples); if(r==null){status.setText("Could not reconstruct this swing. Try again.");return;} status.setText("Swing analyzed locally."); verdict.setText(r.ball.result); verdict.setTextColor("IN ✓".equals(r.ball.result)?ACCENT:RED); metrics.setText(String.format(Locale.US,"Swing speed      %.1f km/h\nImpact speed     %.1f km/h\nProjected ball   %.1f km/h\nFace angle       %+.1f°\nLaunch angle     %+.1f°\nSpin proxy       %.0f rpm\nLanding          x %+.2f m • %.2f m beyond net",r.maxSpeed*3.6,r.impactSpeed*3.6,r.ball.speed*3.6,r.facePitch,r.pathPitch,r.spin, r.ball.x, r.ball.z-11.885)); analysis.setResult(r); }
@@ -90,8 +90,8 @@ public class MainActivity extends Activity implements SensorEventListener {
     static class Result{double maxSpeed,impactSpeed,pathPitch,facePitch,spin;int impact;V[] pos,vel;Ball ball;Result(double a,double b,double c,double d,double e,int f,V[]g,V[]h,Ball i){maxSpeed=a;impactSpeed=b;pathPitch=c;facePitch=d;spin=e;impact=f;pos=g;vel=h;ball=i;}}
 
     float[] transpose(float[] a){return new float[]{a[0],a[3],a[6],a[1],a[4],a[7],a[2],a[5],a[8]};}
-    float[] mul(float[] a,float[] b){float[] o=new float[9];for(int r=0;r<3;r++)for(int c=0;c<3;c++)o[r*3+c]=a[r*3]*b[c]+a[r*3+1]*b[3+c]+a[r*3+2]*b[6+c];return o;}
-    float[] mul(float[] m,float[] v){return new float[]{m[0]*v[0]+m[1]*v[1]+m[2]*v[2],m[3]*v[0]+m[4]*v[1]+m[5]*v[2],m[6]*v[0]+m[7]*v[1]+m[8]*v[2]};}
+    float[] mulMat(float[] a,float[] b){float[] o=new float[9];for(int r=0;r<3;r++)for(int c=0;c<3;c++)o[r*3+c]=a[r*3]*b[c]+a[r*3+1]*b[3+c]+a[r*3+2]*b[6+c];return o;}
+    float[] mulVec(float[] m,float[] v){return new float[]{m[0]*v[0]+m[1]*v[1]+m[2]*v[2],m[3]*v[0]+m[4]*v[1]+m[5]*v[2],m[6]*v[0]+m[7]*v[1]+m[8]*v[2]};}
     double mag(double x,double y,double z){return Math.sqrt(x*x+y*y+z*z);} static double clamp(double v,double a,double b){return Math.max(a,Math.min(b,v));}
     TextView tv(String s,float sp,int color,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(color);v.setLineSpacing(0,1.12f);if(bold)v.setTypeface(v.getTypeface(),Typeface.BOLD);return v;}
     View card(View child){LinearLayout c=new LinearLayout(this);c.setPadding(dp(16),dp(14),dp(16),dp(14));c.setBackgroundColor(SURFACE);c.addView(child);return c;}
