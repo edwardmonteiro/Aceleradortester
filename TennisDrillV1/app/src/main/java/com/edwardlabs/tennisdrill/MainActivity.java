@@ -593,7 +593,8 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     TextView tv(String s,float sp,int color,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(color);v.setLineSpacing(0,1.15f);if(bold)v.setTypeface(v.getTypeface(),Typeface.BOLD);return v;}
-    View card(View child){LinearLayout c=new LinearLayout(this);c.setPadding(dp(16),dp(15),dp(16),dp(15));c.setBackground(roundRect(SURFACE,16,LINE,1));c.addView(child);return c;}\n    View chip(View child){LinearLayout c=new LinearLayout(this);c.setPadding(dp(14),dp(12),dp(14),dp(12));c.setBackground(roundRect(SURFACE,999,LINE,1));c.addView(child);return c;}
+    View card(View child){LinearLayout c=new LinearLayout(this);c.setPadding(dp(16),dp(15),dp(16),dp(15));c.setBackground(roundRect(SURFACE,16,LINE,1));c.addView(child);return c;}
+    View chip(View child){LinearLayout c=new LinearLayout(this);c.setPadding(dp(14),dp(12),dp(14),dp(12));c.setBackground(roundRect(SURFACE,999,LINE,1));c.addView(child);return c;}
     Button button(String s,boolean primaryStyle){Button b=new Button(this);b.setText(s);b.setTextSize(15);b.setTypeface(b.getTypeface(),Typeface.BOLD);b.setMinHeight(dp(56));b.setTextColor(primaryStyle?BG:TEXT);GradientDrawable g=new GradientDrawable();g.setCornerRadius(dp(16));g.setColor(primaryStyle?ACCENT:SURFACE);g.setStroke(dp(1),primaryStyle?ACCENT:LINE);b.setBackground(g);return b;}
     Space space(int d){Space s=new Space(this);s.setLayoutParams(new LinearLayout.LayoutParams(1,dp(d)));return s;}int dp(int v){return(int)(v*getResources().getDisplayMetrics().density+.5f);}
 }
