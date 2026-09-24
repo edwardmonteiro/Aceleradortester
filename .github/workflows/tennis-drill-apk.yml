@@ -1,0 +1,42 @@
+name: Build Tennis Drill APK
+
+on:
+  push:
+    branches:
+      - chatgpt/tennis-drill-v1
+    paths:
+      - "TennisDrillV1/**"
+      - ".github/workflows/tennis-drill-apk.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        working-directory: TennisDrillV1
+        run: gradle assembleDebug --stacktrace
+
+      - name: Rename APK
+        run: cp TennisDrillV1/app/build/outputs/apk/debug/app-debug.apk TennisDrill-V1-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TennisDrill-V1-APK
+          path: TennisDrill-V1-debug.apk
+          retention-days: 30
