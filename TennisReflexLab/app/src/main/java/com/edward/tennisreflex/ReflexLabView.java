@@ -40,7 +40,9 @@ public class ReflexLabView extends View implements SensorEventListener {
 
     private Screen screen=Screen.HOME;
     private Game game=Game.BALANCE;
-    private float ax,ay,az=9.81f,gx,gy,gz,linearMag,roll,pitch,calibRoll,calibPitch;
+    private float ax,ay,az=9.81f,gx,gy,gz,linearMag,roll,pitch,filteredRoll,filteredPitch,calibRoll,calibPitch;
+    private float balanceX,balanceY,precisionX,precisionY;
+    private boolean sensorFilterReady;
     private boolean calibrated,neutralReady=true,waitingResponse,currentGo=true,chaosReverse,dailyMode;
     private long lastGestureAt,gameStart,gameDurationMs,nextPromptAt,promptAt,promptDeadline,stableSince;
     private int currentDir=-1,hits,misses,trials,rallyStreak,rallyBest,rallyLives,chaosRound,dailyIndex,lastScore;
@@ -77,6 +79,19 @@ public class ReflexLabView extends View implements SensorEventListener {
             ax=e.values[0]; ay=e.values[1]; az=e.values[2];
             roll=(float)Math.atan2(ax,az);
             pitch=(float)Math.atan2(-ay,Math.sqrt(ax*ax+az*az));
+
+            // Heavy low-pass filtering for fine motor-control drills.
+            // Raw accelerometer tilt is intentionally NOT mapped directly to the ball.
+            if(!sensorFilterReady){
+                filteredRoll=roll;
+                filteredPitch=pitch;
+                sensorFilterReady=true;
+            } else {
+                final float sensorAlpha=0.085f;
+                filteredRoll += (roll-filteredRoll)*sensorAlpha;
+                filteredPitch += (pitch-filteredPitch)*sensorAlpha;
+            }
+
             if(linear==null){float m=(float)Math.sqrt(ax*ax+ay*ay+az*az); linearMag=Math.abs(m-9.81f);}
         } else if(e.sensor.getType()==Sensor.TYPE_GYROSCOPE){gx=e.values[0];gy=e.values[1];gz=e.values[2];}
         else if(e.sensor.getType()==Sensor.TYPE_LINEAR_ACCELERATION){
@@ -164,24 +179,43 @@ public class ReflexLabView extends View implements SensorEventListener {
     }
 
     private void drawBalance(Canvas c){
-        float w=getWidth(),cx=w/2f,cy=dp(310),dr=roll-calibRoll,dpt=pitch-calibPitch,maxTilt=.32f;
-        float ux=clamp(dr/maxTilt,-1,1),uy=clamp(dpt/maxTilt,-1,1),radius=dp(96);
+        float w=getWidth(),cx=w/2f,cy=dp(310);
+        float dr=filteredRoll-calibRoll,dpt=filteredPitch-calibPitch;
+        final float deadZone=.035f;   // ~2 degrees
+        final float maxTilt=.50f;     // ~28.6 degrees for full travel
+
+        float targetX=softTilt(dr,deadZone,maxTilt);
+        float targetY=softTilt(dpt,deadZone,maxTilt);
+
+        // Visual damping: the ball follows the filtered target instead of snapping to it.
+        final float follow=.075f;
+        balanceX += (targetX-balanceX)*follow;
+        balanceY += (targetY-balanceY)*follow;
+
+        float radius=dp(96);
         circle(c,cx,cy,radius,PANEL2);
         p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(2));p.setColor(MUTED);c.drawCircle(cx,cy,dp(34),p);p.setStyle(Paint.Style.FILL);
-        circle(c,cx+ux*radius,cy+uy*radius,dp(13),LIME);
-        float dist=(float)Math.sqrt(ux*ux+uy*uy),instant=clamp(1-dist,0,1); scoreAccumulator+=instant;scoreFrames++;
+        circle(c,cx+balanceX*radius,cy+balanceY*radius,dp(13),LIME);
+
+        float dist=clamp((float)Math.sqrt(balanceX*balanceX+balanceY*balanceY),0,1);
+        float instant=clamp(1-dist,0,1); scoreAccumulator+=instant;scoreFrames++;
         int live=Math.round((scoreAccumulator/Math.max(1,scoreFrames))*100);
+        float tiltDeg=(float)Math.toDegrees(Math.sqrt(dr*dr+dpt*dpt));
+
         textCentered(c,"KEEP IT QUIET",cx,dp(455),dp(22),TEXT,true);
-        textCentered(c,"Smaller corrections score higher.",cx,dp(482),dp(13),MUTED,false);
+        textCentered(c,"Fine tilt • damped response • 2° dead zone",cx,dp(482),dp(13),MUTED,false);
         metric(c,dp(20),dp(525),"STABILITY",live+"/100");
-        metric(c,dp(20),dp(588),"TILT",String.format(Locale.US,"%.1f°",Math.toDegrees(dist*maxTilt)));
+        metric(c,dp(20),dp(588),"TILT",String.format(Locale.US,"%.1f°",tiltDeg));
     }
 
     private void drawPrecision(Canvas c,long now){
         float w=getWidth(),cx=w/2f,cy=dp(315),t=(now-gameStart)/1000f;
         float tx=cx+(float)Math.sin(t*1.15f)*dp(105),ty=cy+(float)Math.sin(t*2.3f)*dp(54);
-        float ux=clamp((roll-calibRoll)/.30f,-1,1),uy=clamp((pitch-calibPitch)/.30f,-1,1);
-        float bx=cx+ux*dp(120),by=cy+uy*dp(90);
+        float targetX=softTilt(filteredRoll-calibRoll,.025f,.42f);
+        float targetY=softTilt(filteredPitch-calibPitch,.025f,.42f);
+        precisionX += (targetX-precisionX)*.11f;
+        precisionY += (targetY-precisionY)*.11f;
+        float bx=cx+precisionX*dp(120),by=cy+precisionY*dp(90);
         p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(2));p.setColor(PANEL2);c.drawOval(new RectF(cx-dp(110),cy-dp(58),cx+dp(110),cy+dp(58)),p);p.setStyle(Paint.Style.FILL);
         circle(c,tx,ty,dp(15),CYAN);circle(c,bx,by,dp(10),LIME);
         float err=(float)Math.hypot(tx-bx,ty-by),instant=clamp(1-err/dp(170),0,1);scoreAccumulator+=instant;scoreFrames++;
@@ -237,7 +271,7 @@ public class ReflexLabView extends View implements SensorEventListener {
         if(waitingResponse){
             boolean answered=false,correct=false;
             if(currentDir==4){
-                float dr=Math.abs(roll-calibRoll),dpt=Math.abs(pitch-calibPitch);
+                float dr=Math.abs(filteredRoll-calibRoll),dpt=Math.abs(filteredPitch-calibPitch);
                 if(dr<.07f&&dpt<.07f){if(stableSince==0)stableSince=now;if(now-stableSince>260){answered=true;correct=true;}} else stableSince=0;
                 if(gesture>=0){answered=true;correct=false;}
             } else if(gesture>=0){answered=true;correct=gesture==currentDir;}
@@ -300,7 +334,9 @@ public class ReflexLabView extends View implements SensorEventListener {
         game=g;screen=Screen.GAME;gameStart=SystemClock.elapsedRealtime();
         gameDurationMs=(g==Game.BALANCE||g==Game.PRECISION)?30000:(g==Game.RALLY?60000:45000);
         nextPromptAt=gameStart+900;promptAt=promptDeadline=0;currentDir=-1;waitingResponse=false;
-        hits=misses=trials=0;reactionTotal=0;scoreAccumulator=0;scoreFrames=0;maxObservedAccel=0;rallyStreak=rallyBest=0;rallyLives=3;chaosRound=0;chaosReverse=false;stableSince=0;neutralReady=true;lastGestureAt=0;feedbackPulse(18);
+        hits=misses=trials=0;reactionTotal=0;scoreAccumulator=0;scoreFrames=0;maxObservedAccel=0;rallyStreak=rallyBest=0;rallyLives=3;chaosRound=0;chaosReverse=false;stableSince=0;neutralReady=true;lastGestureAt=0;
+        balanceX=balanceY=precisionX=precisionY=0f;
+        feedbackPulse(18);
     }
 
     private void finishTimedGame(){
@@ -325,7 +361,7 @@ public class ReflexLabView extends View implements SensorEventListener {
     }
 
     private int detectGesture(long now){
-        float dr=roll-calibRoll,dpt=pitch-calibPitch;
+        float dr=filteredRoll-calibRoll,dpt=filteredPitch-calibPitch;
         if(Math.abs(dr)<.075f&&Math.abs(dpt)<.075f)neutralReady=true;
         if(!neutralReady||now-lastGestureAt<180)return-1;
         int dir=-1;float th=.16f;
@@ -337,7 +373,7 @@ public class ReflexLabView extends View implements SensorEventListener {
     private int reactionScore(){if(trials==0||hits==0)return 0;float accuracy=hits/(float)trials,avg=(float)(reactionTotal/hits),speed=clamp((700-avg)/450,0,1);return Math.round(100*(.55f*accuracy+.45f*speed));}
     private int accuracyReactionScore(){if(trials==0)return 0;float accuracy=hits/(float)trials,avg=hits==0?900:(float)(reactionTotal/hits),speed=clamp((800-avg)/520,0,1);return Math.round(100*(.7f*accuracy+.3f*speed));}
 
-    private void calibrate(){calibRoll=roll;calibPitch=pitch;calibrated=true;prefs.edit().putBoolean("calibrated",true).putFloat("calibRoll",calibRoll).putFloat("calibPitch",calibPitch).apply();feedback(true);}
+    private void calibrate(){calibRoll=filteredRoll;calibPitch=filteredPitch;balanceX=balanceY=precisionX=precisionY=0f;calibrated=true;prefs.edit().putBoolean("calibrated",true).putFloat("calibRoll",calibRoll).putFloat("calibPitch",calibPitch).apply();feedback(true);}
 
     @Override public boolean onTouchEvent(MotionEvent e){
         if(e.getAction()!=MotionEvent.ACTION_UP)return true;float x=e.getX(),y=e.getY();
@@ -376,6 +412,14 @@ public class ReflexLabView extends View implements SensorEventListener {
     private void text(Canvas c,String s,float x,float y,float size,int color,boolean bold){p.setStyle(Paint.Style.FILL);p.setColor(color);p.setTextSize(size);p.setTextAlign(Paint.Align.LEFT);p.setTypeface(android.graphics.Typeface.create("sans-serif",bold?1:0));c.drawText(s,x,y,p);}
     private void textRight(Canvas c,String s,float x,float y,float size,int color,boolean bold){p.setStyle(Paint.Style.FILL);p.setColor(color);p.setTextSize(size);p.setTextAlign(Paint.Align.RIGHT);p.setTypeface(android.graphics.Typeface.create("sans-serif",bold?1:0));c.drawText(s,x,y,p);}
     private void textCentered(Canvas c,String s,float x,float y,float size,int color,boolean bold){p.setStyle(Paint.Style.FILL);p.setColor(color);p.setTextSize(size);p.setTextAlign(Paint.Align.CENTER);p.setTypeface(android.graphics.Typeface.create("sans-serif",bold?1:0));c.drawText(s,x,y,p);}
+    private float softTilt(float value,float deadZone,float maxTilt){
+        float sign=value<0?-1f:1f,mag=Math.abs(value);
+        if(mag<=deadZone)return 0f;
+        float normalized=clamp((mag-deadZone)/(maxTilt-deadZone),0f,1f);
+        // Power curve gives much finer control around center, while preserving full range.
+        float curved=(float)Math.pow(normalized,1.55);
+        return sign*curved;
+    }
     private float dp(float v){return v*getResources().getDisplayMetrics().density;}
     private float clamp(float v,float lo,float hi){return Math.max(lo,Math.min(hi,v));}
     private int clampInt(int v,int lo,int hi){return Math.max(lo,Math.min(hi,v));}
