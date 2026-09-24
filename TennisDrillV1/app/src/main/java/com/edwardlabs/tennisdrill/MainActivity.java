@@ -485,7 +485,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         m[3]*v[0]+m[4]*v[1]+m[5]*v[2],
         m[6]*v[0]+m[7]*v[1]+m[8]*v[2]};}
 
-    double mag(double x,double y,double z){return Math.sqrt(x*x+y*y+z*z);}
+    String yes(boolean v){return v?"✓":"—";}\n    double mag(double x,double y,double z){return Math.sqrt(x*x+y*y+z*z);}
     static double clamp(double v,double a,double b){return Math.max(a,Math.min(b,v));}
 
     TextView tv(String s,float sp,int color,boolean bold){
