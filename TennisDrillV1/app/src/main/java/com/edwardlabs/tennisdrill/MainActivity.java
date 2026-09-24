@@ -14,12 +14,12 @@ import java.util.*;
 public class MainActivity extends Activity implements SensorEventListener {
     static final int BG=Color.rgb(10,13,12), SURFACE=Color.rgb(21,25,23), TEXT=Color.rgb(244,247,245), MUTED=Color.rgb(166,176,170), ACCENT=Color.rgb(216,255,87), RED=Color.rgb(255,120,120);
     SensorManager sm; Sensor lin, gyro, rot;
-    TextView status, live, metrics, verdict; Button calibrate, arm; ProgressBar progress; AnalysisView analysis;
+    TextView status, live, metrics, verdict, phaseTitle, phaseInstruction; Button calibrate, arm, nextPhase; ProgressBar progress; AnalysisView analysis; CalibrationView calibrationView; Spinner strokeSpinner;
     final Handler h=new Handler(Looper.getMainLooper());
-    boolean calibrating=false, calibrated=false, armed=false, recording=false;
+    boolean calibrating=false, calibrated=false, armed=false, recording=false, referenceMode=false; int calibrationStage=0;
     long calStart, recordStart, quietStart;
     final float[] aBias=new float[3], gBias=new float[3], lastA=new float[3], lastG=new float[3], lastR=new float[9], baseR=new float[9];
-    int calN=0; final ArrayList<Sample> samples=new ArrayList<>();
+    int calN=0; final ArrayList<Sample> samples=new ArrayList<>(); final float[][] phaseR=new float[5][9]; final String[] phaseNames={"READY POSITION","TAKEBACK","RACKET DROP","IMPACT ZONE","FOLLOW-THROUGH","SLOW REFERENCE SWING"}; final String[] phaseHints={"Raquete à frente, corpo neutro. Segure por um instante.","Arme o golpe para trás como faria antes de acelerar.","Deixe a cabeça da raquete cair para o slot de aceleração.","Passe pela zona de contato à frente do corpo.","Finalize o golpe por completo, sem interromper o braço.","Faça um forehand inteiro lentamente: ready → armada → swing → finish."};
 
     @Override public void onCreate(Bundle b){ super.onCreate(b); getWindow().setStatusBarColor(BG); getWindow().setNavigationBarColor(BG); buildUi(); sm=(SensorManager)getSystemService(SENSOR_SERVICE); lin=sm.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION); gyro=sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE); rot=sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR); updateAvailability(); }
     @Override protected void onResume(){
@@ -48,14 +48,29 @@ public class MainActivity extends Activity implements SensorEventListener {
     void buildUi(){
         ScrollView scroll=new ScrollView(this); scroll.setFillViewport(true); scroll.setBackgroundColor(BG); scroll.setFitsSystemWindows(true);
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(20),dp(18),dp(20),dp(36)); scroll.addView(root,new ScrollView.LayoutParams(-1,-2));
-        root.addView(tv("TENNIS DRILL  V1",13,MUTED,true)); root.addView(tv("Your phone is the racket.",30,TEXT,true)); root.addView(tv("100% local • no camera • no internet",14,MUTED,false));
+        root.addView(tv("TENNIS DRILL  V2",13,MUTED,true)); root.addView(tv("Calibrate your tennis swing.",30,TEXT,true)); root.addView(tv("100% local • guided biomechanics • no camera",14,MUTED,false));
         TextView safety=tv("Use a secure grip or wrist tether. Clear the area before swinging.",12,MUTED,false); safety.setPadding(0,dp(8),0,0); root.addView(safety);
-        root.addView(space(18)); status=tv("Calibrate before your first swing.",18,TEXT,true); root.addView(card(status));
+        root.addView(space(18)); status=tv("Start with guided calibration.",18,TEXT,true); root.addView(card(status));
         live=tv("Checking sensors…",13,MUTED,false); root.addView(live);
-        root.addView(space(20)); root.addView(tv("1  CALIBRATE",13,MUTED,true)); root.addView(tv("Hold the phone upright and still. Screen toward you, back of phone toward the net. Calibration takes 3 seconds.",14,MUTED,false));
+
+        root.addView(space(20)); root.addView(tv("1  CHOOSE STROKE",13,MUTED,true));
+        strokeSpinner=new Spinner(this);
+        String[] strokes={"Forehand","Backhand — one hand","Backhand — two hands","Serve"};
+        ArrayAdapter<String> adapter=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,strokes);
+        strokeSpinner.setAdapter(adapter); root.addView(strokeSpinner,new LinearLayout.LayoutParams(-1,dp(56)));
+
+        root.addView(space(14)); root.addView(tv("2  SENSOR BASELINE",13,MUTED,true));
+        root.addView(tv("Primeiro removemos o bias dos sensores. Apoie ou segure o celular completamente imóvel por 3 segundos.",14,MUTED,false));
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal); progress.setMax(1000); progress.setVisibility(View.GONE); root.addView(progress,new LinearLayout.LayoutParams(-1,dp(8))); root.addView(space(10));
-        calibrate=button("CALIBRATE 3 SEC",false); calibrate.setOnClickListener(v->beginCalibration()); root.addView(calibrate);
-        root.addView(space(22)); root.addView(tv("2  SWING",13,MUTED,true)); arm=button("ARM SWING",true); arm.setEnabled(false); arm.setAlpha(.45f); arm.setOnClickListener(v->{ if(!armed) armSwing(); else cancelSwing(); }); root.addView(arm);
+        calibrate=button("START 3 SEC BASELINE",false); calibrate.setOnClickListener(v->beginCalibration()); root.addView(calibrate);
+
+        root.addView(space(20)); root.addView(tv("3  GUIDED TENNIS CALIBRATION",13,MUTED,true));
+        calibrationView=new CalibrationView(this); calibrationView.setBackgroundColor(SURFACE); root.addView(calibrationView,new LinearLayout.LayoutParams(-1,dp(310)));
+        phaseTitle=tv("WAITING FOR BASELINE",20,TEXT,true); root.addView(phaseTitle);
+        phaseInstruction=tv("Depois da calibração imóvel, vamos aprender cada fase do seu golpe.",14,MUTED,false); phaseInstruction.setPadding(0,dp(6),0,dp(8)); root.addView(phaseInstruction);
+        nextPhase=button("CAPTURE PHASE",true); nextPhase.setEnabled(false); nextPhase.setAlpha(.45f); nextPhase.setOnClickListener(v->captureCalibrationPhase()); root.addView(nextPhase);
+
+        root.addView(space(22)); root.addView(tv("4  PRACTICE SWING",13,MUTED,true)); arm=button("ARM PRACTICE SWING",true); arm.setEnabled(false); arm.setAlpha(.45f); arm.setOnClickListener(v->{ if(!armed) armSwing(); else cancelSwing(); }); root.addView(arm);
         root.addView(space(24)); root.addView(tv("RESULT",13,MUTED,true)); verdict=tv("No swing recorded yet.",28,TEXT,true); root.addView(verdict); metrics=tv("",16,TEXT,false); metrics.setPadding(0,dp(8),0,0); root.addView(metrics);
         root.addView(space(18)); analysis=new AnalysisView(this); analysis.setBackgroundColor(SURFACE); root.addView(analysis,new LinearLayout.LayoutParams(-1,dp(600)));
         TextView note=tv("IN/OUT and ball speed are projections from phone motion, not measurements of a real ball.",12,MUTED,false); note.setPadding(0,dp(10),0,0); root.addView(note);
@@ -65,8 +80,38 @@ public class MainActivity extends Activity implements SensorEventListener {
     void updateAvailability(){ boolean ok=lin!=null&&gyro!=null&&rot!=null; live.setText("Sensors • linear accel "+yes(lin!=null)+" • gyro "+yes(gyro!=null)+" • rotation "+yes(rot!=null)); if(!ok){ live.setTextColor(RED); status.setText("This phone is missing a required motion sensor."); } }
     String yes(boolean v){return v?"✓":"—";}
     void beginCalibration(){ if(lin==null||gyro==null||rot==null)return; calibrating=true; calibrated=false; armed=false; recording=false; calStart=System.nanoTime(); calN=0; Arrays.fill(aBias,0); Arrays.fill(gBias,0); progress.setProgress(0); progress.setVisibility(View.VISIBLE); arm.setEnabled(false); arm.setAlpha(.45f); status.setText("Keep the phone completely still…"); }
-    void armSwing(){ armed=true; recording=false; samples.clear(); arm.setText("CANCEL"); status.setText("Armed. Hold ready, then swing naturally."); }
+    void armSwing(){ armed=true; recording=false; referenceMode=false; samples.clear(); arm.setText("CANCEL"); status.setText("Armed. Start from your calibrated ready position."); }
     void cancelSwing(){ armed=false; recording=false; samples.clear(); arm.setText("ARM SWING"); status.setText("Capture cancelled."); }
+
+    void showCalibrationStage(){
+        if(calibrationStage<5){
+            phaseTitle.setText((calibrationStage+1)+" / 6   "+phaseNames[calibrationStage]);
+            phaseInstruction.setText(phaseHints[calibrationStage]);
+            nextPhase.setText("CAPTURE "+phaseNames[calibrationStage]);
+        }else{
+            phaseTitle.setText("6 / 6   "+phaseNames[5]);
+            phaseInstruction.setText(phaseHints[5]);
+            nextPhase.setText("RECORD SLOW REFERENCE SWING");
+        }
+        calibrationView.stage=calibrationStage;
+        calibrationView.stroke=strokeSpinner.getSelectedItem().toString();
+        calibrationView.invalidate();
+    }
+
+    void captureCalibrationPhase(){
+        if(calibrationStage<5){
+            System.arraycopy(lastR,0,phaseR[calibrationStage],0,9);
+            status.setText(phaseNames[calibrationStage]+" captured ✓");
+            calibrationStage++;
+            showCalibrationStage();
+            try{ ((android.os.Vibrator)getSystemService(VIBRATOR_SERVICE)).vibrate(45); }catch(Exception ignored){}
+        }else{
+            referenceMode=true; armed=true; recording=false; samples.clear();
+            nextPhase.setText("MOVE THROUGH THE FULL SWING…"); nextPhase.setEnabled(false);
+            status.setText("Reference armed. Start in ready, then complete the full slow swing.");
+            calibrationView.stage=5; calibrationView.invalidate();
+        }
+    }
 
     @Override public void onSensorChanged(SensorEvent e){
         if(e.sensor.getType()==Sensor.TYPE_LINEAR_ACCELERATION){System.arraycopy(e.values,0,lastA,0,3);} else if(e.sensor.getType()==Sensor.TYPE_GYROSCOPE){System.arraycopy(e.values,0,lastG,0,3);} else if(e.sensor.getType()==Sensor.TYPE_ROTATION_VECTOR){SensorManager.getRotationMatrixFromVector(lastR,e.values);} else return;
@@ -74,10 +119,18 @@ public class MainActivity extends Activity implements SensorEventListener {
         if(calibrating){
             for(int i=0;i<3;i++){aBias[i]+=lastA[i];gBias[i]+=lastG[i];} calN++;
             float p=Math.min(1f,(System.nanoTime()-calStart)/3_000_000_000f); progress.setProgress((int)(1000*p));
-            if(p>=1f){ for(int i=0;i<3;i++){aBias[i]/=Math.max(1,calN);gBias[i]/=Math.max(1,calN);} System.arraycopy(lastR,0,baseR,0,9); calibrating=false; calibrated=true; progress.setVisibility(View.GONE); arm.setEnabled(true); arm.setAlpha(1f); status.setText("Calibrated. Ready for a swing."); }
+            if(p>=1f){
+                for(int i=0;i<3;i++){aBias[i]/=Math.max(1,calN);gBias[i]/=Math.max(1,calN);}
+                System.arraycopy(lastR,0,baseR,0,9);
+                calibrating=false; calibrated=false; calibrationStage=0;
+                progress.setVisibility(View.GONE); calibrate.setText("BASELINE ✓"); calibrate.setEnabled(false);
+                nextPhase.setEnabled(true); nextPhase.setAlpha(1f);
+                status.setText("Baseline complete. Now calibrate your tennis motion.");
+                showCalibrationStage();
+            }
             return;
         }
-        if(!armed||!calibrated)return;
+        if(!armed||(!calibrated && !referenceMode))return;
         double am=mag(lastA[0]-aBias[0],lastA[1]-aBias[1],lastA[2]-aBias[2]), gm=mag(lastG[0]-gBias[0],lastG[1]-gBias[1],lastG[2]-gBias[2]);
         live.setText(String.format(Locale.US,"Motion • %.1f m/s² • %.1f rad/s",am,gm));
         if(!recording){ if(am>2.4||gm>1.25){ recording=true; recordStart=now; quietStart=0; status.setText("Recording swing…"); arm.setText("RECORDING"); arm.setEnabled(false); addSample(now); } }
@@ -87,7 +140,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         float[] rel=mulMat(transpose(baseR),lastR); float ax=lastA[0]-aBias[0], ay=lastA[1]-aBias[1], az=lastA[2]-aBias[2]; float[] ar=mulVec(rel,new float[]{ax,ay,az}); float[] gr=mulVec(rel,new float[]{lastG[0]-gBias[0],lastG[1]-gBias[1],lastG[2]-gBias[2]}); float[] face=mulVec(rel,new float[]{0,0,-1});
         samples.add(new Sample(t,new V(ar[0],ar[1],-ar[2]),new V(gr[0],gr[1],-gr[2]),new V(face[0],face[1],-face[2]).norm()));
     }
-    void finishSwing(){ armed=false; recording=false; arm.setText("ARM SWING"); arm.setEnabled(true); if(samples.size()<12){status.setText("Swing too short. Try again.");return;} Result r=analyze(samples); if(r==null){status.setText("Could not reconstruct this swing. Try again.");return;} status.setText("Swing analyzed locally."); verdict.setText(r.ball.result); verdict.setTextColor("IN ✓".equals(r.ball.result)?ACCENT:RED); metrics.setText(String.format(Locale.US,"Swing speed      %.1f km/h\nImpact speed     %.1f km/h\nProjected ball   %.1f km/h\nFace angle       %+.1f°\nLaunch angle     %+.1f°\nSpin proxy       %.0f rpm\nLanding          x %+.2f m • %.2f m beyond net",r.maxSpeed*3.6,r.impactSpeed*3.6,r.ball.speed*3.6,r.facePitch,r.pathPitch,r.spin, r.ball.x, r.ball.z-11.885)); analysis.setResult(r); }
+    void finishSwing(){ armed=false; recording=false; arm.setText("ARM SWING"); arm.setEnabled(true); if(samples.size()<12){status.setText("Swing too short. Try again.");return;} Result r=analyze(samples); if(r==null){status.setText("Could not reconstruct this swing. Try again.");return;} status.setText(referenceMode ? "Reference swing captured." : "Swing analyzed locally."); if(referenceMode){ referenceMode=false; calibrated=true; arm.setEnabled(true); arm.setAlpha(1f); arm.setText("ARM PRACTICE SWING"); nextPhase.setText("CALIBRATION COMPLETE ✓"); nextPhase.setEnabled(false); phaseTitle.setText("PERSONAL SWING PROFILE READY"); phaseInstruction.setText("Agora o app conhece ready, armação, drop, contato, finalização e um swing completo de referência."); calibrationView.stage=6; calibrationView.invalidate(); } verdict.setText(r.ball.result); verdict.setTextColor("IN ✓".equals(r.ball.result)?ACCENT:RED); metrics.setText(String.format(Locale.US,"Swing speed      %.1f km/h\nImpact speed     %.1f km/h\nProjected ball   %.1f km/h\nFace angle       %+.1f°\nLaunch angle     %+.1f°\nSpin proxy       %.0f rpm\nLanding          x %+.2f m • %.2f m beyond net",r.maxSpeed*3.6,r.impactSpeed*3.6,r.ball.speed*3.6,r.facePitch,r.pathPitch,r.spin, r.ball.x, r.ball.z-11.885)); analysis.setResult(r); }
     @Override public void onAccuracyChanged(Sensor s,int a){}
 
     Result analyze(ArrayList<Sample> in){ int n=in.size(); if(n<12)return null; double total=(in.get(n-1).t-in.get(0).t)/1e9; if(total<.12)return null; V[] vel=new V[n]; V[] pos=new V[n]; vel[0]=new V(); pos[0]=new V(); double maxA=0,maxG=0,maxV=0; for(int i=1;i<n;i++){double dt=clamp((in.get(i).t-in.get(i-1).t)/1e9,.0005,.05); V aa=in.get(i-1).a.add(in.get(i).a).mul(.5*dt); vel[i]=vel[i-1].add(aa); maxA=Math.max(maxA,in.get(i).a.mag()); maxG=Math.max(maxG,in.get(i).g.mag());}
@@ -96,6 +149,36 @@ public class MainActivity extends Activity implements SensorEventListener {
         int first=Math.max(1,(int)(n*.18)), last=Math.min(n-1,(int)(n*.90)), impact=first; double best=-1; for(int i=first;i<=last;i++){double sc=.25*in.get(i).a.mag()/Math.max(maxA,1e-6)+.30*in.get(i).g.mag()/Math.max(maxG,1e-6)+.45*vel[i].mag()/Math.max(maxV,1e-6); if(sc>best){best=sc;impact=i;}}
         V iv=new V(); int c=0; for(int i=Math.max(0,impact-2);i<=Math.min(n-1,impact+2);i++){iv=iv.add(vel[i]);c++;} iv=iv.mul(1.0/c); V face=in.get(impact).face.norm(); double pathPitch=Math.toDegrees(Math.atan2(iv.y,Math.sqrt(iv.x*iv.x+iv.z*iv.z))); double facePitch=Math.toDegrees(Math.atan2(face.y,Math.sqrt(face.x*face.x+face.z*face.z))); double spin=clamp(Math.abs(pathPitch-facePitch)*65+in.get(impact).g.mag()*110,0,4200); Ball ball=project(iv,face,spin,pos[impact]); return new Result(maxV,iv.mag(),pathPitch,facePitch,spin,impact,pos,vel,ball); }
     Ball project(V swing,V face,double spin,V impactPos){ V sd=swing.norm(); V dir=face.mul(.68).add(sd.mul(.32)).norm(); if(dir.z<.05)return new Ball("NO FORWARD BALL",0,0,0,new ArrayList<>()); double speed=clamp(swing.mag()*7+3,5,55); V v=dir.mul(speed); V p=new V(clamp(impactPos.x,-1.5,1.5),clamp(1+impactPos.y,.45,2.3),clamp(impactPos.z,-.8,1.5)); ArrayList<V> pts=new ArrayList<>(); pts.add(p); double netH=Double.NaN, dt=.005, extra=clamp(spin/4200,0,1)*4; V prev=p; for(int step=0;step<1600;step++){double sp=v.mag(); V drag=sp>1e-6?v.norm().mul(-.012*sp*sp):new V(); V acc=drag.add(new V(0,-9.80665-extra,0)); v=v.add(acc.mul(dt)); p=p.add(v.mul(dt)); if(step%4==0)pts.add(p); if(Double.isNaN(netH)&&prev.z<11.885&&p.z>=11.885){double f=(11.885-prev.z)/Math.max(1e-9,p.z-prev.z);netH=prev.y+(p.y-prev.y)*f;} if(p.y<=0&&step>4){double f=prev.y/Math.max(1e-9,prev.y-p.y);double x=prev.x+(p.x-prev.x)*f,z=prev.z+(p.z-prev.z)*f;boolean crossed=z>11.885, cleared=!Double.isNaN(netH)&&netH>.914, inside=z>=11.885&&z<=23.77&&Math.abs(x)<=4.115;String res=crossed&&!cleared?"NET":inside&&cleared?"IN ✓":"OUT";pts.add(new V(x,0,z));return new Ball(res,speed,x,z,pts);} prev=p;} return new Ball("OUT",speed,p.x,p.z,pts); }
+
+    class CalibrationView extends View {
+        Paint p=new Paint(1); int stage=-1; String stroke="Forehand";
+        CalibrationView(Context c){super(c);}
+        @Override protected void onDraw(Canvas c){
+            super.onDraw(c);
+            int w=getWidth(),h=getHeight(); float cx=w*.50f, cy=h*.45f;
+            p.setStrokeCap(Paint.Cap.ROUND); p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(7)); p.setColor(Color.rgb(210,218,214));
+            c.drawCircle(cx,cy-dp(72),dp(24),p);
+            c.drawLine(cx,cy-dp(48),cx,cy+dp(40),p);
+            c.drawLine(cx,cy+dp(40),cx-dp(34),cy+dp(105),p);
+            c.drawLine(cx,cy+dp(40),cx+dp(34),cy+dp(105),p);
+            float sx=cx, sy=cy-dp(25), hx=cx+dp(38), hy=cy-dp(6), rx=cx+dp(88), ry=cy-dp(18);
+            if(stage==1){hx=cx-dp(25);hy=cy-dp(20);rx=cx-dp(85);ry=cy-dp(45);}
+            if(stage==2){hx=cx-dp(12);hy=cy+dp(18);rx=cx-dp(58);ry=cy+dp(46);}
+            if(stage==3){hx=cx+dp(52);hy=cy-dp(5);rx=cx+dp(105);ry=cy-dp(8);}
+            if(stage==4){hx=cx+dp(22);hy=cy-dp(55);rx=cx-dp(10);ry=cy-dp(105);}
+            if(stage==5){hx=cx-dp(18);hy=cy+dp(10);rx=cx-dp(90);ry=cy+dp(30);}
+            p.setColor(ACCENT); p.setStrokeWidth(dp(9));
+            c.drawLine(sx,sy,hx,hy,p); c.drawLine(hx,hy,rx,ry,p);
+            p.setStrokeWidth(dp(5)); c.drawOval(new RectF(rx-dp(18),ry-dp(34),rx+dp(18),ry+dp(34)),p);
+            if(stage==5){
+                p.setColor(Color.rgb(100,112,106));p.setStrokeWidth(dp(3));Path g=new Path();g.moveTo(cx-dp(100),cy+dp(35));g.cubicTo(cx-dp(45),cy+dp(65),cx+dp(65),cy-dp(25),cx+dp(15),cy-dp(115));c.drawPath(g,p);
+            }
+            p.setStyle(Paint.Style.FILL); p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD)); p.setTextSize(dp(12)); p.setColor(MUTED);
+            String label=stage<0?"BASELINE FIRST":(stage<6?phaseNames[Math.min(stage,5)]:"CALIBRATED");
+            c.drawText(label,dp(16),h-dp(18),p);
+            p.setTextSize(dp(11));c.drawText(stroke,dp(16),dp(22),p);
+        }
+    }
 
     class AnalysisView extends View { Paint p=new Paint(1); Result r; AnalysisView(Context c){super(c);p.setStrokeWidth(dp(2));} void setResult(Result rr){r=rr;invalidate();} @Override protected void onDraw(Canvas c){super.onDraw(c); int w=getWidth(); p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD)); p.setTextSize(dp(13));p.setColor(MUTED);c.drawText("SWING PATH — TOP",dp(16),dp(28),p); RectF top=new RectF(dp(16),dp(44),w-dp(16),dp(240)); box(c,top); c.drawText("PROJECTED COURT",dp(16),dp(286),p); RectF court=new RectF(dp(30),dp(306),w-dp(30),getHeight()-dp(24)); court(c,court); if(r==null)return; path(c,top,r.pos); ball(c,court,r.ball.pts); }
         void box(Canvas c,RectF q){p.setStyle(Paint.Style.STROKE);p.setColor(Color.rgb(70,78,74));c.drawRect(q,p);p.setStyle(Paint.Style.FILL);}
