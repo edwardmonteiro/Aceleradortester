@@ -23,8 +23,8 @@ import java.util.Locale;
 import java.util.Random;
 
 public class ReflexLabView extends View implements SensorEventListener {
-    private enum Screen { HOME, GAME, RESULT, PROGRESS }
-    private enum Game { BALANCE, PRECISION, REFLEX, SPLIT, CHAOS, RALLY }
+    private enum Screen { HOME, COURT_LAB, GAME, RESULT, PROGRESS }
+    private enum Game { BALANCE, PRECISION, REFLEX, SPLIT, CHAOS, RALLY, RECOVER, ANTICIPATION, TWO_SHOT }
 
     private final int BG=Color.rgb(11,15,20), PANEL=Color.rgb(22,28,36), PANEL2=Color.rgb(29,36,45);
     private final int TEXT=Color.rgb(241,244,247), MUTED=Color.rgb(145,155,168), LIME=Color.rgb(199,255,91);
@@ -45,6 +45,10 @@ public class ReflexLabView extends View implements SensorEventListener {
     private float rallyPlayerX,rallyPlayerY,rallyTargetX,rallyTargetY;
     private long rallyBallStart,rallyTravelMs;
     private boolean rallyBallActive;
+    private boolean courtRecovering;
+    private long courtRecoverStart;
+    private int twoShotStep;
+    private float lastCourtTargetX,lastCourtTargetY;
     private boolean sensorFilterReady;
     private boolean calibrated,neutralReady=true,waitingResponse,currentGo=true,chaosReverse,dailyMode;
     private boolean sessionCalibrating;
@@ -59,7 +63,8 @@ public class ReflexLabView extends View implements SensorEventListener {
     private String lastMetric="",lastMetricValue="";
 
     private final EnumMap<Game,RectF> gameRects=new EnumMap<>(Game.class);
-    private final RectF dailyRect=new RectF(),progressRect=new RectF(),calibrateRect=new RectF(),resultPrimaryRect=new RectF(),resultSecondaryRect=new RectF();
+    private final EnumMap<Game,RectF> courtGameRects=new EnumMap<>(Game.class);
+    private final RectF dailyRect=new RectF(),progressRect=new RectF(),calibrateRect=new RectF(),courtLabRect=new RectF(),courtProgressRect=new RectF(),resultPrimaryRect=new RectF(),resultSecondaryRect=new RectF();
 
     public ReflexLabView(Context c){
         super(c); setBackgroundColor(BG); setKeepScreenOn(true);
@@ -112,6 +117,7 @@ public class ReflexLabView extends View implements SensorEventListener {
         super.onDraw(c);
         long now=SystemClock.elapsedRealtime();
         if(screen==Screen.HOME) drawHome(c);
+        else if(screen==Screen.COURT_LAB) drawCourtLab(c);
         else if(screen==Screen.GAME) drawGame(c,now);
         else if(screen==Screen.RESULT) drawResult(c);
         else drawProgress(c);
@@ -143,7 +149,7 @@ public class ReflexLabView extends View implements SensorEventListener {
         float gap=dp(10),top=dp(382),cardW=(w-pad*2-gap)/2f,cardH=dp(92);
         String[] names={"BALANCE","PRECISION","REFLEX","SPLIT STEP","CHAOS","RALLY REFLEX"};
         String[] subs={"stability","fine control","reaction","first move","decision","endurance"};
-        Game[] gs=Game.values();
+        Game[] gs={Game.BALANCE,Game.PRECISION,Game.REFLEX,Game.SPLIT,Game.CHAOS,Game.RALLY};
         for(int i=0;i<gs.length;i++){
             int row=i/2,col=i%2; float l=pad+col*(cardW+gap),t=top+row*(cardH+gap);
             RectF r=new RectF(l,t,l+cardW,t+cardH); gameRects.put(gs[i],r); roundRect(c,r,PANEL,dp(16));
@@ -154,10 +160,39 @@ public class ReflexLabView extends View implements SensorEventListener {
             textRight(c,best==0?"—":String.valueOf(best),r.right-dp(12),t+dp(24),dp(12),best==0?MUTED:CYAN,true);
         }
 
-        progressRect.set(pad,top+3*(cardH+gap)+dp(2),w-pad,top+3*(cardH+gap)+dp(50));
-        roundRect(c,progressRect,PANEL2,dp(14));
-        text(c,"PROGRESS & BASELINE",pad+dp(16),progressRect.centerY()+dp(5),dp(13),TEXT,true);
-        textRight(c,"→",w-pad-dp(18),progressRect.centerY()+dp(6),dp(20),LIME,true);
+        courtLabRect.set(pad,top+3*(cardH+gap)+dp(2),w-pad,top+3*(cardH+gap)+dp(58));
+        roundRect(c,courtLabRect,PANEL2,dp(14));
+        text(c,"COURT LAB",pad+dp(16),courtLabRect.centerY()-dp(2),dp(14),TEXT,true);
+        text(c,"3 new visual drills",pad+dp(16),courtLabRect.centerY()+dp(18),dp(11),MUTED,false);
+        textRight(c,"→",w-pad-dp(18),courtLabRect.centerY()+dp(7),dp(20),LIME,true);
+    }
+
+    private void drawCourtLab(Canvas c){
+        float w=getWidth(),pad=dp(20);
+        text(c,"‹  COURT LAB",pad,dp(42),dp(14),TEXT,true);
+        text(c,"Read the ball. Move. Recover.",pad,dp(82),dp(25),TEXT,true);
+        text(c,"Visual tennis drills driven by phone motion.",pad,dp(108),dp(13),MUTED,false);
+
+        Game[] modes={Game.RECOVER,Game.ANTICIPATION,Game.TWO_SHOT};
+        String[] names={"RECOVER","ANTICIPATION","TWO SHOT"};
+        String[] subs={"intercept → return to center","read trajectory before target appears","survive two-ball combinations"};
+        float y=dp(146);
+        for(int i=0;i<modes.length;i++){
+            RectF r=new RectF(pad,y,w-pad,y+dp(110));
+            courtGameRects.put(modes[i],r);
+            roundRect(c,r,PANEL,dp(18));
+            text(c,String.format(Locale.US,"%02d",i+1),pad+dp(16),y+dp(28),dp(11),LIME,true);
+            text(c,names[i],pad+dp(16),y+dp(59),dp(19),TEXT,true);
+            text(c,subs[i],pad+dp(16),y+dp(84),dp(12),MUTED,false);
+            int best=prefs.getInt("best_"+modes[i].name(),0);
+            textRight(c,best==0?"—":best+"/100",w-pad-dp(16),y+dp(59),dp(14),best==0?MUTED:CYAN,true);
+            y+=dp(124);
+        }
+
+        courtProgressRect.set(pad,y+dp(8),w-pad,y+dp(60));
+        roundRect(c,courtProgressRect,PANEL2,dp(14));
+        text(c,"PROGRESS & BASELINE",pad+dp(16),courtProgressRect.centerY()+dp(5),dp(13),TEXT,true);
+        textRight(c,"→",w-pad-dp(18),courtProgressRect.centerY()+dp(6),dp(20),LIME,true);
     }
 
     private void drawGame(Canvas c,long now){
@@ -180,6 +215,9 @@ public class ReflexLabView extends View implements SensorEventListener {
             case SPLIT:drawSplit(c,now);break;
             case CHAOS:drawChaos(c,now,gesture);break;
             case RALLY:drawRally(c,now);break;
+            case RECOVER:drawRecover(c,now);break;
+            case ANTICIPATION:drawAnticipation(c,now);break;
+            case TWO_SHOT:drawTwoShot(c,now);break;
         }
     }
 
@@ -382,6 +420,203 @@ public class ReflexLabView extends View implements SensorEventListener {
         tone.startTone(ToneGenerator.TONE_PROP_BEEP2,35);
     }
 
+    private void drawRecover(Canvas c,long now){
+        CourtFrame cf=drawCourtFrame(c);
+        updateCourtPlayer();
+
+        float playerX=cf.cx+rallyPlayerX*(cf.width*.42f);
+        float playerY=dp(390)+rallyPlayerY*dp(88);
+        playerX=clamp(playerX,cf.left+dp(18),cf.right-dp(18));
+        playerY=clamp(playerY,cf.netY+dp(28),cf.bottom-dp(20));
+
+        if(courtRecovering){
+            float centerX=cf.cx, centerY=dp(438);
+            p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(4)); p.setColor(LIME);
+            c.drawCircle(centerX,centerY,dp(36),p); p.setStyle(Paint.Style.FILL);
+
+            float dist=(float)Math.hypot(playerX-centerX,playerY-centerY);
+            if(dist<=dp(38)){
+                hits++; rallyStreak++; rallyBest=Math.max(rallyBest,rallyStreak);
+                courtRecovering=false; nextPromptAt=now+220; feedback(true);
+            } else if(now-courtRecoverStart>1300){
+                misses++; rallyLives--; rallyStreak=0; courtRecovering=false; nextPromptAt=now+300; feedback(false);
+            }
+        } else {
+            if(!rallyBallActive && now>=nextPromptAt) spawnCourtBall(now,1450);
+            if(rallyBallActive){
+                float[] target=drawIncomingBall(c,cf,now,true,0f);
+                if(target[2]>=1f){
+                    trials++;
+                    boolean hit=(float)Math.hypot(playerX-target[0],playerY-target[1])<=dp(48);
+                    rallyBallActive=false;
+                    if(hit){
+                        courtRecovering=true; courtRecoverStart=now; feedbackPulse(18);
+                    } else {
+                        misses++; rallyLives--; rallyStreak=0; nextPromptAt=now+320; feedback(false);
+                    }
+                }
+            }
+        }
+
+        drawCourtPlayer(c,playerX,playerY);
+        if(rallyLives<=0){finishGame(clampInt(rallyBest*8+hits*3,0,100),"BEST RECOVERY",rallyBest+" cycles");return;}
+        textCentered(c,courtRecovering?"RETURN TO CENTER":"INTERCEPT THE BALL",cf.cx,dp(535),dp(13),TEXT,true);
+        textCentered(c,courtRecovering?"Get back before the next shot.":"Reach the landing circle before the bounce.",cf.cx,dp(558),dp(11),MUTED,false);
+        metric(c,dp(20),dp(584),"RECOVERY STREAK",rallyStreak+"   •   BEST "+rallyBest);
+        textCentered(c,"LIVES  "+livesString(rallyLives),cf.cx,dp(656),dp(13),rallyLives==1?RED:MUTED,true);
+    }
+
+    private void drawAnticipation(Canvas c,long now){
+        CourtFrame cf=drawCourtFrame(c);
+        updateCourtPlayer();
+        float playerX=cf.cx+rallyPlayerX*(cf.width*.42f);
+        float playerY=dp(390)+rallyPlayerY*dp(88);
+        playerX=clamp(playerX,cf.left+dp(18),cf.right-dp(18));
+        playerY=clamp(playerY,cf.netY+dp(28),cf.bottom-dp(20));
+
+        if(!rallyBallActive && now>=nextPromptAt) spawnCourtBall(now,Math.max(720,1350-rallyBest*45L));
+        if(rallyBallActive){
+            float progress=clamp((now-rallyBallStart)/(float)rallyTravelMs,0f,1f);
+            // Landing ring appears only late. Early movement must come from reading ball flight.
+            boolean reveal=progress>.58f;
+            float[] target=drawIncomingBall(c,cf,now,reveal,.58f);
+            if(target[2]>=1f){
+                trials++;
+                boolean hit=(float)Math.hypot(playerX-target[0],playerY-target[1])<=dp(48);
+                if(hit){hits++;rallyStreak++;rallyBest=Math.max(rallyBest,rallyStreak);feedback(true);}
+                else{misses++;rallyLives--;rallyStreak=0;feedback(false);}
+                rallyBallActive=false;nextPromptAt=now+260;
+            }
+        }
+
+        drawCourtPlayer(c,playerX,playerY);
+        if(rallyLives<=0){finishGame(clampInt(rallyBest*7+hits*2,0,100),"BEST READ",rallyBest+" balls");return;}
+        textCentered(c,"READ THE FLIGHT",cf.cx,dp(535),dp(13),TEXT,true);
+        textCentered(c,"The landing ring appears late. Move from the trajectory.",cf.cx,dp(558),dp(11),MUTED,false);
+        metric(c,dp(20),dp(584),"READ STREAK",rallyStreak+"   •   BEST "+rallyBest);
+        textCentered(c,"LIVES  "+livesString(rallyLives),cf.cx,dp(656),dp(13),rallyLives==1?RED:MUTED,true);
+    }
+
+    private void drawTwoShot(Canvas c,long now){
+        CourtFrame cf=drawCourtFrame(c);
+        updateCourtPlayer();
+        float playerX=cf.cx+rallyPlayerX*(cf.width*.42f);
+        float playerY=dp(390)+rallyPlayerY*dp(88);
+        playerX=clamp(playerX,cf.left+dp(18),cf.right-dp(18));
+        playerY=clamp(playerY,cf.netY+dp(28),cf.bottom-dp(20));
+
+        if(!rallyBallActive && now>=nextPromptAt){
+            if(twoShotStep==0){
+                spawnCourtBall(now,1300);
+            } else {
+                spawnOppositeCourtBall(now,900);
+            }
+        }
+
+        if(rallyBallActive){
+            float[] target=drawIncomingBall(c,cf,now,true,0f);
+            if(target[2]>=1f){
+                trials++;
+                boolean hit=(float)Math.hypot(playerX-target[0],playerY-target[1])<=dp(48);
+                rallyBallActive=false;
+                if(hit){
+                    if(twoShotStep==0){
+                        twoShotStep=1;
+                        feedbackPulse(18);
+                        nextPromptAt=now+110;
+                    } else {
+                        twoShotStep=0;
+                        hits++;
+                        rallyStreak++;
+                        rallyBest=Math.max(rallyBest,rallyStreak);
+                        nextPromptAt=now+360;
+                        feedback(true);
+                    }
+                } else {
+                    twoShotStep=0;
+                    misses++;rallyLives--;rallyStreak=0;nextPromptAt=now+360;feedback(false);
+                }
+            }
+        }
+
+        drawCourtPlayer(c,playerX,playerY);
+        if(rallyLives<=0){finishGame(clampInt(rallyBest*10+hits*3,0,100),"BEST COMBO",rallyBest+" pairs");return;}
+        textCentered(c,twoShotStep==0?"FIRST BALL":"SECOND BALL",cf.cx,dp(535),dp(13),twoShotStep==0?TEXT:ORANGE,true);
+        textCentered(c,"Two fast interceptions. Stay balanced between them.",cf.cx,dp(558),dp(11),MUTED,false);
+        metric(c,dp(20),dp(584),"COMBO STREAK",rallyStreak+"   •   BEST "+rallyBest);
+        textCentered(c,"LIVES  "+livesString(rallyLives),cf.cx,dp(656),dp(13),rallyLives==1?RED:MUTED,true);
+    }
+
+    private static class CourtFrame{
+        float left,right,top,bottom,netY,cx,width;
+    }
+
+    private CourtFrame drawCourtFrame(Canvas c){
+        CourtFrame cf=new CourtFrame();
+        float w=getWidth();
+        cf.left=dp(34);cf.right=w-dp(34);cf.top=dp(92);cf.bottom=dp(500);cf.netY=dp(280);cf.cx=w/2f;cf.width=cf.right-cf.left;
+        roundRect(c,new RectF(cf.left,cf.top,cf.right,cf.bottom),PANEL,dp(8));
+        p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(2));p.setColor(MUTED);
+        c.drawRect(cf.left,cf.top,cf.right,cf.bottom,p);
+        c.drawLine(cf.left,cf.netY,cf.right,cf.netY,p);
+        c.drawLine(cf.cx,cf.netY,cf.cx,cf.bottom,p);
+        c.drawLine(cf.left,dp(395),cf.right,dp(395),p);
+        p.setStyle(Paint.Style.FILL);
+        return cf;
+    }
+
+    private void updateCourtPlayer(){
+        float targetPlayerX=softTilt(filteredRoll-calibRoll,.025f,.42f);
+        float targetPlayerY=softTilt(filteredPitch-calibPitch,.025f,.42f);
+        rallyPlayerX += (targetPlayerX-rallyPlayerX)*.13f;
+        rallyPlayerY += (targetPlayerY-rallyPlayerY)*.13f;
+    }
+
+    private void drawCourtPlayer(Canvas c,float x,float y){
+        circle(c,x,y,dp(17),LIME);
+        circle(c,x,y,dp(6),BG);
+    }
+
+    private void spawnCourtBall(long now,long travelMs){
+        int lane=random.nextInt(3),depth=random.nextInt(2);
+        rallyTargetX=lane==0?-.78f:(lane==1?0f:.78f);
+        rallyTargetY=depth==0?.18f:.78f;
+        lastCourtTargetX=rallyTargetX;lastCourtTargetY=rallyTargetY;
+        rallyBallStart=now;rallyTravelMs=travelMs;rallyBallActive=true;
+        tone.startTone(ToneGenerator.TONE_PROP_BEEP2,35);
+    }
+
+    private void spawnOppositeCourtBall(long now,long travelMs){
+        rallyTargetX=lastCourtTargetX<-.2f?.78f:(lastCourtTargetX>.2f?-.78f:(random.nextBoolean()?-.78f:.78f));
+        rallyTargetY=lastCourtTargetY<.5f?.78f:.18f;
+        lastCourtTargetX=rallyTargetX;lastCourtTargetY=rallyTargetY;
+        rallyBallStart=now;rallyTravelMs=travelMs;rallyBallActive=true;
+        tone.startTone(ToneGenerator.TONE_PROP_BEEP2,35);
+    }
+
+    private float[] drawIncomingBall(Canvas c,CourtFrame cf,long now,boolean showRing,float revealAt){
+        float tx=cf.cx+rallyTargetX*(cf.width*.40f);
+        float ty=cf.netY+dp(42)+rallyTargetY*dp(155);
+        float progress=clamp((now-rallyBallStart)/(float)rallyTravelMs,0f,1f);
+
+        if(showRing && progress>=revealAt){
+            p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(4));p.setColor(CYAN);
+            c.drawCircle(tx,ty,dp(34),p);p.setStyle(Paint.Style.FILL);circle(c,tx,ty,dp(4),CYAN);
+        }
+
+        float eased=progress*progress*(3f-2f*progress);
+        float ballX=cf.cx+(tx-cf.cx)*eased;
+        float ballY=cf.top+dp(22)+(ty-(cf.top+dp(22)))*eased;
+        circle(c,ballX,ballY,dp(7)+dp(5)*progress,ORANGE);
+
+        if(showRing && progress>=revealAt){
+            p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(3));p.setColor(LIME);
+            RectF arc=new RectF(tx-dp(43),ty-dp(43),tx+dp(43),ty+dp(43));
+            c.drawArc(arc,-90,360f*(1f-progress),false,p);p.setStyle(Paint.Style.FILL);
+        }
+        return new float[]{tx,ty,progress};
+    }
+
     private void drawDirectionStage(Canvas c,int dir,int color,String title,String sub){
         float w=getWidth();
         textCentered(c,title,w/2f,dp(130),dp(14),MUTED,true);
@@ -401,7 +636,7 @@ public class ReflexLabView extends View implements SensorEventListener {
         textRight(c,"BEST  "+prefs.getInt("best_"+game.name(),0),w-pad-dp(18),dp(374),dp(12),MUTED,true);
 
         resultPrimaryRect.set(pad,dp(444),w-pad,dp(506));roundRect(c,resultPrimaryRect,LIME,dp(17));
-        String primary=dailyMode&&dailyIndex<Game.values().length-1?"NEXT DRILL":"BACK TO LAB";
+        String primary=dailyMode&&dailyIndex<5?"NEXT DRILL":"BACK TO LAB";
         textCentered(c,primary,w/2f,dp(482),dp(15),BG,true);
         resultSecondaryRect.set(pad,dp(520),w-pad,dp(574));roundRect(c,resultSecondaryRect,PANEL2,dp(16));
         textCentered(c,"RETRY",w/2f,dp(554),dp(14),TEXT,true);
@@ -444,6 +679,10 @@ public class ReflexLabView extends View implements SensorEventListener {
         rallyBallActive=false;
         rallyBallStart=0;
         rallyTravelMs=1550;
+        courtRecovering=false;
+        courtRecoverStart=0;
+        twoShotStep=0;
+        lastCourtTargetX=lastCourtTargetY=0f;
         feedbackPulse(18);
     }
 
@@ -505,7 +744,7 @@ public class ReflexLabView extends View implements SensorEventListener {
 
     private String calibrationInstruction(){
         if(game==Game.SPLIT)return"Hold the phone where you will move.";
-        if(game==Game.REFLEX||game==Game.CHAOS||game==Game.RALLY)return"Hold your natural ready position.";
+        if(game==Game.REFLEX||game==Game.CHAOS||game==Game.RALLY||game==Game.RECOVER||game==Game.ANTICIPATION||game==Game.TWO_SHOT)return"Hold your natural ready position.";
         return"Hold the phone in your starting position.";
     }
 
@@ -517,6 +756,9 @@ public class ReflexLabView extends View implements SensorEventListener {
             case REFLEX:score=reactionScore();metric="AVG REACTION";value=hits==0?"—":Math.round(reactionTotal/hits)+" ms";break;
             case SPLIT:score=reactionScore();metric="AVG START";value=hits==0?"—":Math.round(reactionTotal/hits)+" ms";break;
             case CHAOS:score=accuracyReactionScore();metric="DECISION ACCURACY";value=trials==0?"—":Math.round(100f*hits/trials)+"%";break;
+            case RECOVER:score=clampInt(rallyBest*8+hits*3,0,100);metric="BEST RECOVERY";value=rallyBest+" cycles";break;
+            case ANTICIPATION:score=clampInt(rallyBest*7+hits*2,0,100);metric="BEST READ";value=rallyBest+" balls";break;
+            case TWO_SHOT:score=clampInt(rallyBest*10+hits*3,0,100);metric="BEST COMBO";value=rallyBest+" pairs";break;
             default:score=clampInt(rallyBest*6+hits*2,0,100);metric="BEST RALLY";value=rallyBest+" balls";
         }
         finishGame(score,metric,value);
@@ -548,15 +790,21 @@ public class ReflexLabView extends View implements SensorEventListener {
     @Override public boolean onTouchEvent(MotionEvent e){
         if(e.getAction()!=MotionEvent.ACTION_UP)return true;float x=e.getX(),y=e.getY();
         if(screen==Screen.HOME){
-            if(dailyRect.contains(x,y)){dailyMode=true;dailyIndex=0;startGame(Game.values()[0]);return true;}
+            if(dailyRect.contains(x,y)){dailyMode=true;dailyIndex=0;startGame(Game.BALANCE);return true;}
             if(calibrateRect.contains(x,y)){calibrate();return true;}
-            if(progressRect.contains(x,y)){screen=Screen.PROGRESS;return true;}
-            for(Game g:Game.values()){RectF r=gameRects.get(g);if(r!=null&&r.contains(x,y)){dailyMode=false;startGame(g);return true;}}
+            if(courtLabRect.contains(x,y)){screen=Screen.COURT_LAB;return true;}
+            Game[] main={Game.BALANCE,Game.PRECISION,Game.REFLEX,Game.SPLIT,Game.CHAOS,Game.RALLY};
+            for(Game g:main){RectF r=gameRects.get(g);if(r!=null&&r.contains(x,y)){dailyMode=false;startGame(g);return true;}}
+        } else if(screen==Screen.COURT_LAB){
+            if(y<dp(80)){screen=Screen.HOME;return true;}
+            if(courtProgressRect.contains(x,y)){screen=Screen.PROGRESS;return true;}
+            Game[] visual={Game.RECOVER,Game.ANTICIPATION,Game.TWO_SHOT};
+            for(Game g:visual){RectF r=courtGameRects.get(g);if(r!=null&&r.contains(x,y)){dailyMode=false;startGame(g);return true;}}
         } else if(screen==Screen.GAME){
             if(y<dp(72)){screen=Screen.HOME;dailyMode=false;return true;}
             if(!calibrated&&calibrateRect.contains(x,y)){calibrate();startGame(game);return true;}
         } else if(screen==Screen.RESULT){
-            if(resultPrimaryRect.contains(x,y)){if(dailyMode&&dailyIndex<Game.values().length-1){dailyIndex++;startGame(Game.values()[dailyIndex]);}else{dailyMode=false;screen=Screen.HOME;}return true;}
+            if(resultPrimaryRect.contains(x,y)){if(dailyMode&&dailyIndex<5){dailyIndex++;Game[] dailyGames={Game.BALANCE,Game.PRECISION,Game.REFLEX,Game.SPLIT,Game.CHAOS,Game.RALLY};startGame(dailyGames[dailyIndex]);}else{dailyMode=false;screen=Screen.HOME;}return true;}
             if(resultSecondaryRect.contains(x,y)){startGame(game);return true;}
         } else if(screen==Screen.PROGRESS&&y<dp(80)){screen=Screen.HOME;return true;}
         return true;
@@ -567,7 +815,7 @@ public class ReflexLabView extends View implements SensorEventListener {
     private int getLevel(){return Math.min(50,1+prefs.getInt("xp",0)/400);}
     private float getLevelProgress(){return(prefs.getInt("xp",0)%400)/400f;}
     private String getLeague(int l){if(l<=10)return"FOUNDATION";if(l<=20)return"CONTROL";if(l<=30)return"REACTION";if(l<=40)return"MOVEMENT";return"TENNIS IQ";}
-    private String gameTitle(Game g){switch(g){case BALANCE:return"BALANCE";case PRECISION:return"PRECISION";case REFLEX:return"REFLEX";case SPLIT:return"SPLIT STEP";case CHAOS:return"CHAOS";default:return"RALLY REFLEX";}}
+    private String gameTitle(Game g){switch(g){case BALANCE:return"BALANCE";case PRECISION:return"PRECISION";case REFLEX:return"REFLEX";case SPLIT:return"SPLIT STEP";case CHAOS:return"CHAOS";case RALLY:return"RALLY REFLEX";case RECOVER:return"RECOVER";case ANTICIPATION:return"ANTICIPATION";default:return"TWO SHOT";}}
     private String dirSymbol(int d){switch(d){case 0:return"←";case 1:return"→";case 2:return"↑";case 3:return"↓";default:return"·";}}
     private String rallyCommand(int d){switch(d){case 0:return"LEFT";case 1:return"RIGHT";case 2:return"SHORT";case 3:return"DEEP";default:return"RECOVER";}}
     private String rallyHint(int d){switch(d){case 0:return"tilt left";case 1:return"tilt right";case 2:return"drive forward";case 3:return"drop back";default:return"return to neutral";}}
