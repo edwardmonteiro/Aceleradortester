@@ -42,6 +42,9 @@ public class ReflexLabView extends View implements SensorEventListener {
     private Game game=Game.BALANCE;
     private float ax,ay,az=9.81f,gx,gy,gz,linearMag,roll,pitch,filteredRoll,filteredPitch,calibRoll,calibPitch;
     private float balanceX,balanceY,precisionX,precisionY;
+    private float rallyPlayerX,rallyPlayerY,rallyTargetX,rallyTargetY;
+    private long rallyBallStart,rallyTravelMs;
+    private boolean rallyBallActive;
     private boolean sensorFilterReady;
     private boolean calibrated,neutralReady=true,waitingResponse,currentGo=true,chaosReverse,dailyMode;
     private boolean sessionCalibrating;
@@ -176,7 +179,7 @@ public class ReflexLabView extends View implements SensorEventListener {
             case REFLEX:drawReflex(c,now,gesture);break;
             case SPLIT:drawSplit(c,now);break;
             case CHAOS:drawChaos(c,now,gesture);break;
-            case RALLY:drawRally(c,now,gesture);break;
+            case RALLY:drawRally(c,now);break;
         }
     }
 
@@ -268,26 +271,115 @@ public class ReflexLabView extends View implements SensorEventListener {
         metric(c,dp(20),dp(598),"ACCURACY",trials==0?"—":Math.round(100f*hits/trials)+"%");
     }
 
-    private void drawRally(Canvas c,long now,int gesture){
-        if(!waitingResponse&&now>=nextPromptAt){currentDir=random.nextInt(5);waitingResponse=true;promptAt=now;promptDeadline=now+Math.max(520,1300-hits*22L);stableSince=0;tone.startTone(ToneGenerator.TONE_PROP_BEEP2,40);}
-        if(waitingResponse){
-            boolean answered=false,correct=false;
-            if(currentDir==4){
-                float dr=Math.abs(filteredRoll-calibRoll),dpt=Math.abs(filteredPitch-calibPitch);
-                if(dr<.07f&&dpt<.07f){if(stableSince==0)stableSince=now;if(now-stableSince>260){answered=true;correct=true;}} else stableSince=0;
-                if(gesture>=0){answered=true;correct=false;}
-            } else if(gesture>=0){answered=true;correct=gesture==currentDir;}
-            if(answered){trials++;if(correct){hits++;rallyStreak++;rallyBest=Math.max(rallyBest,rallyStreak);reactionTotal+=now-promptAt;feedback(true);}else{misses++;rallyLives--;rallyStreak=0;feedback(false);}waitingResponse=false;nextPromptAt=now+180;stableSince=0;}
-            else if(now>promptDeadline){trials++;misses++;rallyLives--;rallyStreak=0;waitingResponse=false;nextPromptAt=now+180;stableSince=0;feedback(false);}
-        }
-        if(rallyLives<=0){finishGame(clampInt(rallyBest*4+hits*2,0,100),"BEST RALLY",rallyBest+" shots");return;}
+    private void drawRally(Canvas c,long now){
         float w=getWidth();
-        textCentered(c,"RALLY "+rallyStreak,w/2f,dp(130),dp(18),CYAN,true);
-        textCentered(c,waitingResponse?rallyCommand(currentDir):"READY",w/2f,dp(300),dp(48),waitingResponse?LIME:MUTED,true);
-        textCentered(c,waitingResponse?rallyHint(currentDir):"Read • move • recover",w/2f,dp(340),dp(14),MUTED,false);
-        textCentered(c,"LIVES  "+livesString(rallyLives),w/2f,dp(430),dp(15),rallyLives==1?RED:TEXT,true);
-        metric(c,dp(20),dp(535),"BEST RALLY",rallyBest+" shots");
-        metric(c,dp(20),dp(598),"AVG REACTION",hits==0?"—":Math.round(reactionTotal/hits)+" ms");
+        float left=dp(34),right=w-dp(34),top=dp(92),bottom=dp(500);
+        float netY=dp(280);
+        float courtW=right-left;
+
+        // Draw a simple top-down tennis court.
+        roundRect(c,new RectF(left,top,right,bottom),PANEL,dp(8));
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(dp(2));
+        p.setColor(MUTED);
+        c.drawRect(left,top,right,bottom,p);
+        c.drawLine(left,netY,right,netY,p);
+        c.drawLine(w/2f,netY,w/2f,bottom,p);
+        c.drawLine(left,dp(395),right,dp(395),p);
+        p.setStyle(Paint.Style.FILL);
+
+        // The player's green marker follows the phone continuously.
+        float targetPlayerX=softTilt(filteredRoll-calibRoll,.025f,.42f);
+        float targetPlayerY=softTilt(filteredPitch-calibPitch,.025f,.42f);
+        rallyPlayerX += (targetPlayerX-rallyPlayerX)*.13f;
+        rallyPlayerY += (targetPlayerY-rallyPlayerY)*.13f;
+
+        float playerX=w/2f+rallyPlayerX*(courtW*.42f);
+        float playerY=dp(390)+rallyPlayerY*dp(88);
+        playerX=clamp(playerX,left+dp(18),right-dp(18));
+        playerY=clamp(playerY,netY+dp(28),bottom-dp(20));
+
+        // Spawn the next incoming ball after a short recovery beat.
+        if(!rallyBallActive && now>=nextPromptAt){
+            spawnRallyBall(now);
+        }
+
+        if(rallyBallActive){
+            float tx=w/2f+rallyTargetX*(courtW*.40f);
+            float ty=netY+dp(42)+rallyTargetY*dp(155);
+
+            // Landing zone: this is the only thing the player needs to understand.
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(dp(4));
+            p.setColor(CYAN);
+            c.drawCircle(tx,ty,dp(34),p);
+            p.setStyle(Paint.Style.FILL);
+            circle(c,tx,ty,dp(4),CYAN);
+
+            float progress=clamp((now-rallyBallStart)/(float)rallyTravelMs,0f,1f);
+            // Ease-in makes the ball feel like it is accelerating toward the player.
+            float eased=progress*progress*(3f-2f*progress);
+            float ballX=w/2f+(tx-w/2f)*eased;
+            float ballY=top+dp(22)+(ty-(top+dp(22)))*eased;
+            float ballRadius=dp(7)+dp(5)*progress;
+            circle(c,ballX,ballY,ballRadius,ORANGE);
+
+            // Small time arc around the landing zone.
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(dp(3));
+            p.setColor(LIME);
+            RectF arc=new RectF(tx-dp(43),ty-dp(43),tx+dp(43),ty+dp(43));
+            c.drawArc(arc,-90,360f*(1f-progress),false,p);
+            p.setStyle(Paint.Style.FILL);
+
+            if(progress>=1f){
+                trials++;
+                float distance=(float)Math.hypot(playerX-tx,playerY-ty);
+                boolean hit=distance<=dp(48);
+                if(hit){
+                    hits++;
+                    rallyStreak++;
+                    rallyBest=Math.max(rallyBest,rallyStreak);
+                    reactionTotal+=rallyTravelMs;
+                    feedback(true);
+                }else{
+                    misses++;
+                    rallyLives--;
+                    rallyStreak=0;
+                    feedback(false);
+                }
+                rallyBallActive=false;
+                nextPromptAt=now+320;
+            }
+        }
+
+        // Player marker always remains visible.
+        circle(c,playerX,playerY,dp(17),LIME);
+        circle(c,playerX,playerY,dp(6),BG);
+
+        if(rallyLives<=0){
+            finishGame(clampInt(rallyBest*6+hits*2,0,100),"BEST RALLY",rallyBest+" balls");
+            return;
+        }
+
+        textCentered(c,"MOVE GREEN → LANDING CIRCLE",w/2f,dp(535),dp(13),TEXT,true);
+        textCentered(c,"Tilt the phone. Be inside the ring when the ball lands.",w/2f,dp(558),dp(11),MUTED,false);
+        metric(c,dp(20),dp(584),"RALLY",rallyStreak+"   •   BEST "+rallyBest);
+        textCentered(c,"LIVES  "+livesString(rallyLives),w/2f,dp(656),dp(13),rallyLives==1?RED:MUTED,true);
+    }
+
+    private void spawnRallyBall(long now){
+        // Three horizontal lanes and two depths create six readable landing zones.
+        int lane=random.nextInt(3);
+        int depth=random.nextInt(2);
+        rallyTargetX=lane==0?-.78f:(lane==1?0f:.78f);
+        rallyTargetY=depth==0?.18f:.78f;
+
+        rallyBallStart=now;
+        // Starts forgiving, then becomes faster as the rally survives.
+        rallyTravelMs=Math.max(700,1550-rallyBest*55L);
+        rallyBallActive=true;
+        tone.startTone(ToneGenerator.TONE_PROP_BEEP2,35);
     }
 
     private void drawDirectionStage(Canvas c,int dir,int color,String title,String sub){
@@ -347,6 +439,11 @@ public class ReflexLabView extends View implements SensorEventListener {
         nextPromptAt=gameStart+900;promptAt=promptDeadline=0;currentDir=-1;waitingResponse=false;
         hits=misses=trials=0;reactionTotal=0;scoreAccumulator=0;scoreFrames=0;maxObservedAccel=0;rallyStreak=rallyBest=0;rallyLives=3;chaosRound=0;chaosReverse=false;stableSince=0;neutralReady=true;lastGestureAt=0;
         balanceX=balanceY=precisionX=precisionY=0f;
+        rallyPlayerX=rallyPlayerY=0f;
+        rallyTargetX=rallyTargetY=0f;
+        rallyBallActive=false;
+        rallyBallStart=0;
+        rallyTravelMs=1550;
         feedbackPulse(18);
     }
 
@@ -420,7 +517,7 @@ public class ReflexLabView extends View implements SensorEventListener {
             case REFLEX:score=reactionScore();metric="AVG REACTION";value=hits==0?"—":Math.round(reactionTotal/hits)+" ms";break;
             case SPLIT:score=reactionScore();metric="AVG START";value=hits==0?"—":Math.round(reactionTotal/hits)+" ms";break;
             case CHAOS:score=accuracyReactionScore();metric="DECISION ACCURACY";value=trials==0?"—":Math.round(100f*hits/trials)+"%";break;
-            default:score=clampInt(rallyBest*4+hits*2,0,100);metric="BEST RALLY";value=rallyBest+" shots";
+            default:score=clampInt(rallyBest*6+hits*2,0,100);metric="BEST RALLY";value=rallyBest+" balls";
         }
         finishGame(score,metric,value);
     }
