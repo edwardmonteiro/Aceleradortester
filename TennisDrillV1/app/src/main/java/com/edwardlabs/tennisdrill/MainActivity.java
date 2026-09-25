@@ -22,7 +22,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     Button primary;
     ProgressBar progress;
     ShadowView shadowView;
-    MotionBalanceView balanceView;
+    MotionBalanceView balanceView;\n    LandmarkTimelineView landmarkView;
 
     Stage stage=Stage.BASELINE;
     boolean baselineRunning=false,seriesArmed=false,recording=false,waitingForReady=true;
@@ -70,7 +70,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(18),dp(18),dp(18),dp(38));
         scroll.addView(root,new ScrollView.LayoutParams(-1,-2));
 
-        root.addView(tv("TENNIS DRILL  V3.3",12,MUTED,true));
+        root.addView(tv("TENNIS DRILL  V3.4",12,MUTED,true));
         root.addView(tv("Shadow Forehand",32,TEXT,true));
         root.addView(tv("Move. Compare. Learn.",15,MUTED,false));
 
@@ -106,6 +106,11 @@ public class MainActivity extends Activity implements SensorEventListener {
         root.addView(tv("FORWARD ↔ UPWARD",12,MUTED,true));
         balanceView=new MotionBalanceView(this); balanceView.setBackground(roundRect(SURFACE,18,LINE,1));
         root.addView(balanceView,new LinearLayout.LayoutParams(-1,dp(158)));
+
+        root.addView(space(16));
+        root.addView(tv("STROKE LANDMARKS",12,MUTED,true));
+        landmarkView=new LandmarkTimelineView(this); landmarkView.setBackground(roundRect(SURFACE,18,LINE,1));
+        root.addView(landmarkView,new LinearLayout.LayoutParams(-1,dp(230)));
 
         root.addView(space(16));
         root.addView(tv("LATEST SWING",12,MUTED,true));
@@ -159,7 +164,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         primary.setEnabled(false); primary.setAlpha(.45f); primary.setText("LISTENING…");
         title.setText("Return to READY first"); instruction.setText("When ready is stable, the app arms automatically. Then perform one full slow forehand.");
         repCounter.setText("0 / 3  REFERENCE"); coach.setText("Ready → takeback → accelerate → finish → ready.");
-        shadowView.resetAll(); balanceView.setMetrics(null,null);
+        shadowView.resetAll(); balanceView.setMetrics(null,null); landmarkView.setMetrics(null,null);
     }
 
     void startPracticeSet(){
@@ -170,7 +175,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         primary.setEnabled(false); primary.setAlpha(.45f); primary.setText("SET IN PROGRESS");
         repCounter.setText("0 / 10  TRAINING");
         coach.setText("Match the shape first. Then explore forward versus upward motion.");
-        shadowView.startPractice(referenceX,referenceY); balanceView.setMetrics(null,referenceProfile);
+        shadowView.startPractice(referenceX,referenceY); balanceView.setMetrics(null,referenceProfile); landmarkView.setMetrics(null,referenceProfile);
     }
 
     void resetPractice(){
@@ -180,7 +185,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         instruction.setText("Start another 10-swing set when ready.");
         repCounter.setText("0 / 10  TRAINING"); metrics.setText("No new swing recorded.");
         coach.setText("Try to reproduce your central shadow before changing the motion.");
-        session.setText(referenceSummary()); shadowView.startPractice(referenceX,referenceY); balanceView.setMetrics(null,referenceProfile);
+        session.setText(referenceSummary()); shadowView.startPractice(referenceX,referenceY); balanceView.setMetrics(null,referenceProfile); landmarkView.setMetrics(null,referenceProfile);
     }
 
     @Override public void onSensorChanged(SensorEvent e){
@@ -234,7 +239,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         if(!recording){
             // Keep a short pre-roll after READY so takeback is not cut off.
             addSample(now);
-            while(current.size()>50) current.remove(0);
+            while(current.size()>160) current.remove(0);
             if(am>1.35 || gm>0.72){
                 recording=true;
                 recordStart=current.isEmpty()?now:current.get(0).t;
@@ -290,7 +295,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         if(current.size()<14){current.clear();title.setText("Too short — return to READY");shadowView.endLive(false);return;}
         Metrics m=analyze(current); current.clear();
         if(m==null){title.setText("Could not analyze — return to READY");shadowView.endLive(false);return;}
-        latest=m; metrics.setText(formatMetrics(m)); balanceView.setMetrics(m,referenceProfile);
+        latest=m; metrics.setText(formatMetrics(m)); balanceView.setMetrics(m,referenceProfile); landmarkView.setMetrics(m,referenceProfile);
 
         if(stage==Stage.LEARN){
             references.add(m); referenceCount++; shadowView.addReference(m.traceX,m.traceY);
@@ -364,8 +369,74 @@ public class MainActivity extends Activity implements SensorEventListener {
         for(int i=2;i<=peakSpeedIdx;i++){if(speed[i]>=speed[i-1])inc++;comp++;}
         double smoothness=comp==0?0:100.0*inc/comp;
 
+        Landmarks lm=detectLandmarks(in,pos,vel,speed,gyroM,accelM,impact,peakGyroIdx,maxSpeed,maxGyro,total);
         float[][] trace=traceFromPositions(pos,64);
-        return new Metrics(total,maxSpeed,maxGyro,maxAccel,pathAngle,forwardPct,upwardPct,followRatio,peakOffsetMs,smoothness,impact,speed,trace[0],trace[1]);
+        return new Metrics(total,maxSpeed,maxGyro,maxAccel,pathAngle,forwardPct,upwardPct,followRatio,peakOffsetMs,smoothness,impact,speed,trace[0],trace[1],lm);
+    }
+
+    Landmarks detectLandmarks(ArrayList<Sample> in,V[] pos,V[] vel,double[] speed,double[] gyroM,double[] accelM,
+                              int impact,int peakGyroIdx,double maxSpeed,double maxGyro,double total){
+        int n=in.size();
+        int takebackStart=Math.max(1,(int)(n*.06));
+        double moveThreshold=Math.max(.45,maxGyro*.14);
+        for(int i=takebackStart;i<Math.min(impact,n-1);i++){
+            if(gyroM[i]>moveThreshold || accelM[i]>1.0){takebackStart=i;break;}
+        }
+
+        int maxTakeback=takebackStart;
+        double minForward=pos[takebackStart].z;
+        for(int i=takebackStart;i<Math.max(takebackStart+1,impact);i++){
+            if(pos[i].z<minForward){minForward=pos[i].z;maxTakeback=i;}
+        }
+
+        int drive=Math.min(Math.max(maxTakeback+1,takebackStart+1),Math.max(1,impact));
+        double driveThreshold=Math.max(.10,maxSpeed*.13);
+        for(int i=drive;i<=impact;i++){
+            if(vel[i].z>driveThreshold && speed[i]>=speed[Math.max(0,i-1)]){drive=i;break;}
+        }
+
+        int split=-1;
+        double bestSplit=0;
+        int splitEnd=Math.min(takebackStart,Math.max(2,(int)(n*.38)));
+        for(int i=2;i<splitEnd;i++){
+            double verticalPulse=Math.abs(in.get(i).a.y);
+            double score=verticalPulse*(1.0-clamp(gyroM[i]/Math.max(.8,maxGyro),0,.75));
+            if(score>bestSplit){bestSplit=score;split=i;}
+        }
+        if(bestSplit<1.15)split=-1;
+
+        int followEnd=n-1;
+        int minFollow=Math.min(n-1,impact+Math.max(3,(int)(n*.05)));
+        for(int i=minFollow;i<n;i++){
+            if(speed[i]<Math.max(.08,maxSpeed*.16)){followEnd=i;break;}
+        }
+
+        double maxLat=0,maxOther=.001;
+        for(int i=takebackStart;i<=impact;i++){
+            maxLat=Math.max(maxLat,Math.abs(pos[i].x));
+            maxOther=Math.max(maxOther,Math.abs(pos[i].z)+Math.abs(pos[i].y));
+        }
+        double lateralPrepPct=100*maxLat/(maxLat+maxOther);
+
+        long t0=in.get(0).t;
+        Landmarks lm=new Landmarks();
+        lm.splitDetected=split>=0;
+        lm.splitT=split>=0?frac(in.get(split).t,t0,total):Double.NaN;
+        lm.takebackT=frac(in.get(takebackStart).t,t0,total);
+        lm.driveT=frac(in.get(drive).t,t0,total);
+        lm.peakT=frac(in.get(peakGyroIdx).t,t0,total);
+        lm.contactT=frac(in.get(impact).t,t0,total);
+        lm.followT=frac(in.get(followEnd).t,t0,total);
+        lm.lateralPrepPct=lateralPrepPct;
+        if(split>=0){
+            lm.loadToDriveMs=(in.get(drive).t-in.get(split).t)/1e6;
+            lm.loadToContactMs=(in.get(impact).t-in.get(split).t)/1e6;
+        }
+        return lm;
+    }
+
+    double frac(long t,long t0,double total){
+        return clamp(((t-t0)/1e9)/Math.max(.001,total),0,1);
     }
 
     float[][] traceFromPositions(V[] pos,int points){
@@ -406,13 +477,33 @@ public class MainActivity extends Activity implements SensorEventListener {
         double duration=0,maxSpeed=0,maxGyro=0,maxAccel=0,path=0,forward=0,upward=0,follow=0,peak=0,smooth=0;
         for(Metrics m:list){duration+=m.duration;maxSpeed+=m.maxSpeed;maxGyro+=m.maxGyro;maxAccel+=m.maxAccel;path+=m.pathAngle;forward+=m.forwardPct;upward+=m.upwardPct;follow+=m.followRatio;peak+=m.peakOffsetMs;smooth+=m.smoothness;}
         int n=Math.max(1,list.size());
-        return new Metrics(duration/n,maxSpeed/n,maxGyro/n,maxAccel/n,path/n,forward/n,upward/n,follow/n,peak/n,smooth/n,0,new double[]{0},new float[64],new float[64]);
+        Landmarks avgLm=averageLandmarks(list);
+        return new Metrics(duration/n,maxSpeed/n,maxGyro/n,maxAccel/n,path/n,forward/n,upward/n,follow/n,peak/n,smooth/n,0,new double[]{0},new float[64],new float[64],avgLm);
+    }
+
+    Landmarks averageLandmarks(ArrayList<Metrics> list){
+        Landmarks out=new Landmarks(); int n=Math.max(1,list.size()),splitN=0;
+        double take=0,drive=0,peak=0,contact=0,follow=0,lat=0,splitT=0,ltd=0,ltc=0;
+        for(Metrics m:list){
+            if(m.lm==null)continue;
+            take+=m.lm.takebackT;drive+=m.lm.driveT;peak+=m.lm.peakT;contact+=m.lm.contactT;follow+=m.lm.followT;lat+=m.lm.lateralPrepPct;
+            if(m.lm.splitDetected){splitN++;splitT+=m.lm.splitT;ltd+=m.lm.loadToDriveMs;ltc+=m.lm.loadToContactMs;}
+        }
+        out.takebackT=take/n;out.driveT=drive/n;out.peakT=peak/n;out.contactT=contact/n;out.followT=follow/n;out.lateralPrepPct=lat/n;
+        out.splitDetected=splitN>0;
+        if(splitN>0){out.splitT=splitT/splitN;out.loadToDriveMs=ltd/splitN;out.loadToContactMs=ltc/splitN;}
+        return out;
     }
 
     String coachFor(Metrics m){
         if(referenceProfile!=null){
             double shape=traceDistance(m.traceX,m.traceY,referenceX,referenceY);
             if(shape>.23)return "Match the central shadow first. Your swing shape drifted more than usual.";
+            if(m.lm!=null && referenceProfile.lm!=null && m.lm.splitDetected && referenceProfile.lm.splitDetected){
+                double d=m.lm.loadToDriveMs-referenceProfile.lm.loadToDriveMs;
+                if(d>120)return "Your load-to-drive sequence was slower than your reference. Connect the lower-body load to the forward drive sooner.";
+                if(d<-120)return "Your drive started much earlier after the load. Keep the sequence controlled instead of rushing it.";
+            }
         }
         if(m.smoothness<70)return "Build speed progressively. Smooth acceleration is the priority.";
         if(m.followRatio<.30)return "Finish longer. Do not stop at the virtual contact.";
@@ -454,9 +545,11 @@ public class MainActivity extends Activity implements SensorEventListener {
         else learn="Balanced forward + upward";
         double match=(referenceX==null)?Double.NaN:100.0-clamp(traceDistance(m.traceX,m.traceY,referenceX,referenceY)*145.0,0,100);
         String matchText=Double.isNaN(match)?"—":String.format(Locale.US,"%.0f%%",match);
+        String split=(m.lm!=null&&m.lm.splitDetected)?String.format(Locale.US,"%.0f ms load→drive",m.lm.loadToDriveMs):"not detected";
+        String lateral=(m.lm==null)?"—":String.format(Locale.US,"%.0f%%",m.lm.lateralPrepPct);
         return String.format(Locale.US,
-            "Shadow match     %s\nForward / Up      %.0f%% / %.0f%%\nSwing path        %+.1f°\nFollow-through    %.0f%%\nSmoothness        %.0f%%\nTempo             %.2f s\n\n%s",
-            matchText,m.forwardPct,m.upwardPct,m.pathAngle,m.followRatio*100,m.smoothness,m.duration,learn);
+            "Shadow match     %s\nForward / Up      %.0f%% / %.0f%%\nSwing path        %+.1f°\nFollow-through    %.0f%%\nSmoothness        %.0f%%\nSplit/load proxy  %s\nLateral prep      %s proxy\nTempo             %.2f s\n\n%s",
+            matchText,m.forwardPct,m.upwardPct,m.pathAngle,m.followRatio*100,m.smoothness,split,lateral,m.duration,learn);
     }
 
     void updateSensorStatus(){
@@ -533,6 +626,49 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
     }
 
+    class LandmarkTimelineView extends View{
+        Paint p=new Paint(1); Metrics m,ref;
+        LandmarkTimelineView(Context c){super(c);}
+        void setMetrics(Metrics mm,Metrics rr){m=mm;ref=rr;invalidate();}
+        @Override protected void onDraw(Canvas c){
+            super.onDraw(c); int w=getWidth(),h=getHeight();
+            p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));p.setStyle(Paint.Style.FILL);
+            p.setTextSize(dp(12));p.setColor(MUTED);c.drawText("MOVEMENT TIMELINE",dp(16),dp(24),p);
+
+            Metrics use=m!=null?m:ref;
+            if(use==null||use.lm==null){
+                p.setTextSize(dp(14));p.setColor(MUTED);c.drawText("Landmarks appear after a swing.",dp(16),h/2f,p);return;
+            }
+            Landmarks lm=use.lm;
+            float left=dp(22),right=w-dp(22),y=dp(92);
+            p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(2));p.setColor(LINE);c.drawLine(left,y,right,y,p);
+
+            drawNode(c,left,y,"READY","",false,true);
+            if(lm.splitDetected) drawNode(c,xFor(left,right,lm.splitT),y,"SPLIT","proxy",true,false);
+            drawNode(c,xFor(left,right,lm.takebackT),y,"TAKEBACK","",false,false);
+            drawNode(c,xFor(left,right,lm.driveT),y,"DRIVE","",false,false);
+            drawNode(c,xFor(left,right,lm.peakT),y,"PEAK","",false,false);
+            drawNode(c,xFor(left,right,lm.contactT),y,"CONTACT","proxy",true,false);
+            drawNode(c,xFor(left,right,lm.followT),y,"FOLLOW","end",false,false);
+
+            p.setStyle(Paint.Style.FILL);p.setTextSize(dp(12));p.setColor(TEXT);
+            String chain=lm.splitDetected
+                ? String.format(Locale.US,"Load → drive  %.0f ms     Load → contact  %.0f ms",lm.loadToDriveMs,lm.loadToContactMs)
+                : "Split/load proxy not detected in this swing";
+            c.drawText(chain,dp(16),h-dp(48),p);
+            p.setTextSize(dp(11));p.setColor(MUTED);
+            c.drawText(String.format(Locale.US,"Lateral preparation proxy  %.0f%%  •  timing only, not ground force",lm.lateralPrepPct),dp(16),h-dp(24),p);
+        }
+
+        float xFor(float l,float r,double t){return (float)(l+(r-l)*clamp(t,0,1));}
+        void drawNode(Canvas c,float x,float y,String label,String sub,boolean proxy,boolean first){
+            p.setStyle(Paint.Style.FILL);p.setColor(proxy?MUTED:ACCENT);c.drawCircle(x,y,dp(first?6:5),p);
+            p.setTextSize(dp(9));p.setColor(TEXT);p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));
+            float tw=p.measureText(label);c.drawText(label,Math.max(dp(3),Math.min(getWidth()-tw-dp(3),x-tw/2)),y-dp(16),p);
+            if(sub!=null&&!sub.isEmpty()){p.setTextSize(dp(8));p.setColor(MUTED);float sw=p.measureText(sub);c.drawText(sub,Math.max(dp(3),Math.min(getWidth()-sw-dp(3),x-sw/2)),y+dp(20),p);}
+        }
+    }
+
     class MotionBalanceView extends View{
         Paint p=new Paint(1);Metrics m,ref;
         MotionBalanceView(Context c){super(c);}
@@ -564,11 +700,16 @@ public class MainActivity extends Activity implements SensorEventListener {
     static class Sample{
         long t;V a,g,orient;Sample(long T,V A,V G,V O){t=T;a=A;g=G;orient=O;}
     }
+    static class Landmarks{
+        boolean splitDetected=false;
+        double splitT=Double.NaN,takebackT=0,driveT=0,peakT=0,contactT=0,followT=1;
+        double loadToDriveMs=Double.NaN,loadToContactMs=Double.NaN,lateralPrepPct=0;
+    }
     static class Metrics{
         double duration,maxSpeed,maxGyro,maxAccel,pathAngle,forwardPct,upwardPct,followRatio,peakOffsetMs,smoothness;
-        int impact;double[] speed;float[] traceX,traceY;
-        Metrics(double a,double b,double c,double d,double e,double f,double g,double h,double i,double j,int k,double[] l,float[] x,float[] y){
-            duration=a;maxSpeed=b;maxGyro=c;maxAccel=d;pathAngle=e;forwardPct=f;upwardPct=g;followRatio=h;peakOffsetMs=i;smoothness=j;impact=k;speed=l;traceX=x;traceY=y;
+        int impact;double[] speed;float[] traceX,traceY;Landmarks lm;
+        Metrics(double a,double b,double c,double d,double e,double f,double g,double h,double i,double j,int k,double[] l,float[] x,float[] y,Landmarks lm0){
+            duration=a;maxSpeed=b;maxGyro=c;maxAccel=d;pathAngle=e;forwardPct=f;upwardPct=g;followRatio=h;peakOffsetMs=i;smoothness=j;impact=k;speed=l;traceX=x;traceY=y;lm=lm0;
         }
     }
 
