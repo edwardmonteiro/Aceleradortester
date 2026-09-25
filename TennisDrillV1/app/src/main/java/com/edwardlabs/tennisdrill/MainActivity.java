@@ -22,7 +22,8 @@ public class MainActivity extends Activity implements SensorEventListener {
     Button primary;
     ProgressBar progress;
     ShadowView shadowView;
-    MotionBalanceView balanceView;\n    LandmarkTimelineView landmarkView;
+    MotionBalanceView balanceView;
+    LandmarkTimelineView landmarkView;
 
     Stage stage=Stage.BASELINE;
     boolean baselineRunning=false,seriesArmed=false,recording=false,waitingForReady=true;
