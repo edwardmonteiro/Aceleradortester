@@ -52,6 +52,10 @@ public class ReflexLabView extends View implements SensorEventListener {
     private boolean sensorFilterReady;
     private boolean calibrated,neutralReady=true,waitingResponse,currentGo=true,chaosReverse,dailyMode;
     private boolean sessionCalibrating;
+    private boolean motionMapActive,motionMapReady;
+    private int motionMapStage;
+    private float axisSignX=1f,axisSignY=1f;
+    private long motionMapNeutralSince;
     private long autoCalibStart,autoStableSince;
     private float autoRollSum,autoPitchSum;
     private int autoCalibSamples;
@@ -77,6 +81,9 @@ public class ReflexLabView extends View implements SensorEventListener {
         prefs=c.getSharedPreferences("tennis_reflex_lab",Context.MODE_PRIVATE);
         calibrated=prefs.getBoolean("calibrated",false);
         calibRoll=prefs.getFloat("calibRoll",0f); calibPitch=prefs.getFloat("calibPitch",0f);
+        motionMapReady=prefs.getBoolean("motionMapReady",false);
+        axisSignX=prefs.getFloat("axisSignX",1f);
+        axisSignY=prefs.getFloat("axisSignY",1f);
     }
 
     public void startSensors(){
@@ -142,8 +149,8 @@ public class ReflexLabView extends View implements SensorEventListener {
         textRight(c,"START",w-pad-dp(18),dp(248),dp(14),BG,true);
 
         calibrateRect.set(pad,dp(286),w-pad,dp(330)); roundRect(c,calibrateRect,PANEL2,dp(14));
-        text(c,"AUTO-CENTER",pad+dp(16),dp(313),dp(13),GREEN,true);
-        textRight(c,"EVERY DRILL",w-pad-dp(16),dp(313),dp(11),MUTED,false);
+        text(c,"MOTION MAP",pad+dp(16),dp(313),dp(13),motionMapReady?GREEN:ORANGE,true);
+        textRight(c,motionMapReady?"LEARNED • TAP TO RESET":"AUTO SETUP",w-pad-dp(16),dp(313),dp(11),MUTED,false);
 
         text(c,"DRILLS",pad,dp(366),dp(12),MUTED,true);
         float gap=dp(10),top=dp(382),cardW=(w-pad*2-gap)/2f,cardH=dp(92);
@@ -206,6 +213,10 @@ public class ReflexLabView extends View implements SensorEventListener {
             drawAutoCalibration(c,now);
             return;
         }
+        if(motionMapActive){
+            drawMotionMap(c,now);
+            return;
+        }
         if(remaining<=0){finishTimedGame();return;}
         int gesture=detectGesture(now);
         switch(game){
@@ -223,7 +234,7 @@ public class ReflexLabView extends View implements SensorEventListener {
 
     private void drawBalance(Canvas c){
         float w=getWidth(),cx=w/2f,cy=dp(310);
-        float dr=filteredRoll-calibRoll,dpt=filteredPitch-calibPitch;
+        float dr=mappedRollDelta(),dpt=mappedPitchDelta();
         final float deadZone=.035f;   // ~2 degrees
         final float maxTilt=.50f;     // ~28.6 degrees for full travel
 
@@ -254,8 +265,8 @@ public class ReflexLabView extends View implements SensorEventListener {
     private void drawPrecision(Canvas c,long now){
         float w=getWidth(),cx=w/2f,cy=dp(315),t=(now-gameStart)/1000f;
         float tx=cx+(float)Math.sin(t*1.15f)*dp(105),ty=cy+(float)Math.sin(t*2.3f)*dp(54);
-        float targetX=softTilt(filteredRoll-calibRoll,.025f,.42f);
-        float targetY=softTilt(filteredPitch-calibPitch,.025f,.42f);
+        float targetX=softTilt(mappedRollDelta(),.025f,.42f);
+        float targetY=softTilt(mappedPitchDelta(),.025f,.42f);
         precisionX += (targetX-precisionX)*.11f;
         precisionY += (targetY-precisionY)*.11f;
         float bx=cx+precisionX*dp(120),by=cy+precisionY*dp(90);
@@ -327,8 +338,8 @@ public class ReflexLabView extends View implements SensorEventListener {
         p.setStyle(Paint.Style.FILL);
 
         // The player's green marker follows the phone continuously.
-        float targetPlayerX=softTilt(filteredRoll-calibRoll,.025f,.42f);
-        float targetPlayerY=softTilt(filteredPitch-calibPitch,.025f,.42f);
+        float targetPlayerX=softTilt(mappedRollDelta(),.025f,.42f);
+        float targetPlayerY=softTilt(mappedPitchDelta(),.025f,.42f);
         rallyPlayerX += (targetPlayerX-rallyPlayerX)*.13f;
         rallyPlayerY += (targetPlayerY-rallyPlayerY)*.13f;
 
@@ -566,8 +577,8 @@ public class ReflexLabView extends View implements SensorEventListener {
     }
 
     private void updateCourtPlayer(){
-        float targetPlayerX=softTilt(filteredRoll-calibRoll,.025f,.42f);
-        float targetPlayerY=softTilt(filteredPitch-calibPitch,.025f,.42f);
+        float targetPlayerX=softTilt(mappedRollDelta(),.025f,.42f);
+        float targetPlayerY=softTilt(mappedPitchDelta(),.025f,.42f);
         rallyPlayerX += (targetPlayerX-rallyPlayerX)*.13f;
         rallyPlayerY += (targetPlayerY-rallyPlayerY)*.13f;
     }
@@ -683,6 +694,9 @@ public class ReflexLabView extends View implements SensorEventListener {
         courtRecoverStart=0;
         twoShotStep=0;
         lastCourtTargetX=lastCourtTargetY=0f;
+        motionMapActive=false;
+        motionMapStage=0;
+        motionMapNeutralSince=0;
         feedbackPulse(18);
     }
 
@@ -733,13 +747,100 @@ public class ReflexLabView extends View implements SensorEventListener {
             calibrated=true;
             sessionCalibrating=false;
             balanceX=balanceY=precisionX=precisionY=0f;
-            gameStart=now;
-            nextPromptAt=now+900;
             neutralReady=true;
             prefs.edit().putBoolean("calibrated",true).putFloat("calibRoll",calibRoll).putFloat("calibPitch",calibPitch).apply();
+
+            if(needsMotionMap(game) && !motionMapReady){
+                motionMapActive=true;
+                motionMapStage=0;
+                motionMapNeutralSince=0;
+            } else {
+                gameStart=now;
+                nextPromptAt=now+900;
+            }
             feedbackPulse(28);
             tone.startTone(ToneGenerator.TONE_PROP_ACK,70);
         }
+    }
+
+    private void drawMotionMap(Canvas c,long now){
+        float w=getWidth();
+        float rawX=filteredRoll-calibRoll;
+        float rawY=filteredPitch-calibPitch;
+
+        textCentered(c,"MOTION MAP",w/2f,dp(155),dp(15),ORANGE,true);
+        textCentered(c,"One-time sensor direction setup",w/2f,dp(182),dp(13),MUTED,false);
+
+        if(motionMapStage==0){
+            textCentered(c,"→",w/2f,dp(310),dp(92),LIME,true);
+            textCentered(c,"TILT RIGHT",w/2f,dp(390),dp(21),TEXT,true);
+            textCentered(c,"Move the right edge of the phone downward.",w/2f,dp(420),dp(12),MUTED,false);
+            if(Math.abs(rawX)>.12f && Math.abs(rawX)>Math.abs(rawY)*1.15f){
+                axisSignX=rawX>0?1f:-1f;
+                motionMapStage=1;
+                motionMapNeutralSince=0;
+                feedback(true);
+            }
+        } else if(motionMapStage==1){
+            textCentered(c,"•",w/2f,dp(310),dp(92),CYAN,true);
+            textCentered(c,"RETURN TO CENTER",w/2f,dp(390),dp(21),TEXT,true);
+            textCentered(c,"Hold the phone in your neutral position.",w/2f,dp(420),dp(12),MUTED,false);
+            if(Math.abs(rawX)<.055f && Math.abs(rawY)<.055f){
+                if(motionMapNeutralSince==0) motionMapNeutralSince=now;
+                if(now-motionMapNeutralSince>350){
+                    motionMapStage=2;
+                    motionMapNeutralSince=0;
+                    feedbackPulse(18);
+                }
+            } else motionMapNeutralSince=0;
+        } else if(motionMapStage==2){
+            textCentered(c,"↑",w/2f,dp(310),dp(92),LIME,true);
+            textCentered(c,"TILT FORWARD",w/2f,dp(390),dp(21),TEXT,true);
+            textCentered(c,"Tilt the top edge of the phone away from you.",w/2f,dp(420),dp(12),MUTED,false);
+            if(Math.abs(rawY)>.12f && Math.abs(rawY)>Math.abs(rawX)*1.15f){
+                // Forward must move the marker toward the net, which is up on screen.
+                axisSignY=rawY>0?-1f:1f;
+                motionMapStage=3;
+                motionMapNeutralSince=0;
+                feedback(true);
+            }
+        } else {
+            textCentered(c,"✓",w/2f,dp(310),dp(82),GREEN,true);
+            textCentered(c,"RETURN TO CENTER",w/2f,dp(390),dp(21),TEXT,true);
+            textCentered(c,"Mapping will be saved on this phone.",w/2f,dp(420),dp(12),MUTED,false);
+            if(Math.abs(rawX)<.055f && Math.abs(rawY)<.055f){
+                if(motionMapNeutralSince==0) motionMapNeutralSince=now;
+                if(now-motionMapNeutralSince>350){
+                    motionMapReady=true;
+                    motionMapActive=false;
+                    prefs.edit()
+                            .putBoolean("motionMapReady",true)
+                            .putFloat("axisSignX",axisSignX)
+                            .putFloat("axisSignY",axisSignY)
+                            .apply();
+                    balanceX=balanceY=precisionX=precisionY=0f;
+                    rallyPlayerX=rallyPlayerY=0f;
+                    gameStart=now;
+                    nextPromptAt=now+700;
+                    feedback(true);
+                }
+            } else motionMapNeutralSince=0;
+        }
+
+        int step=Math.min(4,motionMapStage+1);
+        textCentered(c,"STEP "+step+" / 4",w/2f,dp(490),dp(12),MUTED,true);
+    }
+
+    private boolean needsMotionMap(Game g){
+        return g!=Game.SPLIT;
+    }
+
+    private float mappedRollDelta(){
+        return (filteredRoll-calibRoll)*axisSignX;
+    }
+
+    private float mappedPitchDelta(){
+        return (filteredPitch-calibPitch)*axisSignY;
     }
 
     private String calibrationInstruction(){
@@ -773,7 +874,7 @@ public class ReflexLabView extends View implements SensorEventListener {
     }
 
     private int detectGesture(long now){
-        float dr=filteredRoll-calibRoll,dpt=filteredPitch-calibPitch;
+        float dr=mappedRollDelta(),dpt=mappedPitchDelta();
         if(Math.abs(dr)<.075f&&Math.abs(dpt)<.075f)neutralReady=true;
         if(!neutralReady||now-lastGestureAt<180)return-1;
         int dir=-1;float th=.16f;
@@ -791,7 +892,12 @@ public class ReflexLabView extends View implements SensorEventListener {
         if(e.getAction()!=MotionEvent.ACTION_UP)return true;float x=e.getX(),y=e.getY();
         if(screen==Screen.HOME){
             if(dailyRect.contains(x,y)){dailyMode=true;dailyIndex=0;startGame(Game.BALANCE);return true;}
-            if(calibrateRect.contains(x,y)){calibrate();return true;}
+            if(calibrateRect.contains(x,y)){
+                motionMapReady=false;
+                prefs.edit().remove("motionMapReady").remove("axisSignX").remove("axisSignY").apply();
+                feedbackPulse(24);
+                return true;
+            }
             if(courtLabRect.contains(x,y)){screen=Screen.COURT_LAB;return true;}
             Game[] main={Game.BALANCE,Game.PRECISION,Game.REFLEX,Game.SPLIT,Game.CHAOS,Game.RALLY};
             for(Game g:main){RectF r=gameRects.get(g);if(r!=null&&r.contains(x,y)){dailyMode=false;startGame(g);return true;}}
@@ -802,7 +908,7 @@ public class ReflexLabView extends View implements SensorEventListener {
             for(Game g:visual){RectF r=courtGameRects.get(g);if(r!=null&&r.contains(x,y)){dailyMode=false;startGame(g);return true;}}
         } else if(screen==Screen.GAME){
             if(y<dp(72)){screen=Screen.HOME;dailyMode=false;return true;}
-            if(!calibrated&&calibrateRect.contains(x,y)){calibrate();startGame(game);return true;}
+            if(!calibrated&&calibrateRect.contains(x,y)){startGame(game);return true;}
         } else if(screen==Screen.RESULT){
             if(resultPrimaryRect.contains(x,y)){if(dailyMode&&dailyIndex<5){dailyIndex++;Game[] dailyGames={Game.BALANCE,Game.PRECISION,Game.REFLEX,Game.SPLIT,Game.CHAOS,Game.RALLY};startGame(dailyGames[dailyIndex]);}else{dailyMode=false;screen=Screen.HOME;}return true;}
             if(resultSecondaryRect.contains(x,y)){startGame(game);return true;}
