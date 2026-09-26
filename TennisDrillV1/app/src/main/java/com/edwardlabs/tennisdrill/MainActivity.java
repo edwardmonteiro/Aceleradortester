@@ -24,6 +24,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     ShadowView shadowView;
     MotionBalanceView balanceView;
     LandmarkTimelineView landmarkView;
+    Motion3DView motion3dView;
 
     Stage stage=Stage.BASELINE;
     boolean baselineRunning=false,seriesArmed=false,recording=false,waitingForReady=true;
@@ -71,7 +72,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(18),dp(18),dp(18),dp(38));
         scroll.addView(root,new ScrollView.LayoutParams(-1,-2));
 
-        root.addView(tv("TENNIS DRILL  V3.4",12,MUTED,true));
+        root.addView(tv("TENNIS DRILL  V3.5",12,MUTED,true));
         root.addView(tv("Shadow Forehand",32,TEXT,true));
         root.addView(tv("Move. Compare. Learn.",15,MUTED,false));
 
@@ -112,6 +113,27 @@ public class MainActivity extends Activity implements SensorEventListener {
         root.addView(tv("STROKE LANDMARKS",12,MUTED,true));
         landmarkView=new LandmarkTimelineView(this); landmarkView.setBackground(roundRect(SURFACE,18,LINE,1));
         root.addView(landmarkView,new LinearLayout.LayoutParams(-1,dp(230)));
+
+        root.addView(space(16));
+        root.addView(tv("3D MOTION LAB",12,MUTED,true));
+        motion3dView=new Motion3DView(this); motion3dView.setBackground(roundRect(SURFACE,18,LINE,1));
+        root.addView(motion3dView,new LinearLayout.LayoutParams(-1,dp(340)));
+
+        HorizontalScrollView modeScroll=new HorizontalScrollView(this);
+        modeScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout modeRow=new LinearLayout(this); modeRow.setOrientation(LinearLayout.HORIZONTAL);
+        String[] modeNames={"PATH 3D","SPEED","LATERAL","FORWARD/UP","VOLUME"};
+        for(int i=0;i<modeNames.length;i++){
+            final int modeIndex=i;
+            Button mb=modeButton(modeNames[i]);
+            mb.setOnClickListener(v->motion3dView.setMode(modeIndex));
+            LinearLayout.LayoutParams mp=new LinearLayout.LayoutParams(-2,dp(44)); mp.setMargins(0,dp(8),dp(8),0);
+            modeRow.addView(mb,mp);
+        }
+        modeScroll.addView(modeRow,new HorizontalScrollView.LayoutParams(-2,-2));
+        root.addView(modeScroll,new LinearLayout.LayoutParams(-1,dp(58)));
+        TextView rotateHint=tv("Horizontal drag rotates the 3D view • all paths are normalized motion estimates",11,MUTED,false);
+        rotateHint.setPadding(dp(4),dp(3),0,0); root.addView(rotateHint);
 
         root.addView(space(16));
         root.addView(tv("LATEST SWING",12,MUTED,true));
@@ -165,7 +187,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         primary.setEnabled(false); primary.setAlpha(.45f); primary.setText("LISTENING…");
         title.setText("Return to READY first"); instruction.setText("When ready is stable, the app arms automatically. Then perform one full slow forehand.");
         repCounter.setText("0 / 3  REFERENCE"); coach.setText("Ready → takeback → accelerate → finish → ready.");
-        shadowView.resetAll(); balanceView.setMetrics(null,null); landmarkView.setMetrics(null,null);
+        shadowView.resetAll(); balanceView.setMetrics(null,null); landmarkView.setMetrics(null,null); motion3dView.setData(null,null,references,practice);
     }
 
     void startPracticeSet(){
@@ -176,7 +198,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         primary.setEnabled(false); primary.setAlpha(.45f); primary.setText("SET IN PROGRESS");
         repCounter.setText("0 / 10  TRAINING");
         coach.setText("Match the shape first. Then explore forward versus upward motion.");
-        shadowView.startPractice(referenceX,referenceY); balanceView.setMetrics(null,referenceProfile); landmarkView.setMetrics(null,referenceProfile);
+        shadowView.startPractice(referenceX,referenceY); balanceView.setMetrics(null,referenceProfile); landmarkView.setMetrics(null,referenceProfile); motion3dView.setData(null,referenceProfile,references,practice);
     }
 
     void resetPractice(){
@@ -186,7 +208,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         instruction.setText("Start another 10-swing set when ready.");
         repCounter.setText("0 / 10  TRAINING"); metrics.setText("No new swing recorded.");
         coach.setText("Try to reproduce your central shadow before changing the motion.");
-        session.setText(referenceSummary()); shadowView.startPractice(referenceX,referenceY); balanceView.setMetrics(null,referenceProfile); landmarkView.setMetrics(null,referenceProfile);
+        session.setText(referenceSummary()); shadowView.startPractice(referenceX,referenceY); balanceView.setMetrics(null,referenceProfile); landmarkView.setMetrics(null,referenceProfile); motion3dView.setData(null,referenceProfile,references,practice);
     }
 
     @Override public void onSensorChanged(SensorEvent e){
@@ -296,13 +318,13 @@ public class MainActivity extends Activity implements SensorEventListener {
         if(current.size()<14){current.clear();title.setText("Too short — return to READY");shadowView.endLive(false);return;}
         Metrics m=analyze(current); current.clear();
         if(m==null){title.setText("Could not analyze — return to READY");shadowView.endLive(false);return;}
-        latest=m; metrics.setText(formatMetrics(m)); balanceView.setMetrics(m,referenceProfile); landmarkView.setMetrics(m,referenceProfile);
+        latest=m; metrics.setText(formatMetrics(m)); balanceView.setMetrics(m,referenceProfile); landmarkView.setMetrics(m,referenceProfile); motion3dView.setData(m,referenceProfile,references,practice);
 
         if(stage==Stage.LEARN){
-            references.add(m); referenceCount++; shadowView.addReference(m.traceX,m.traceY);
+            references.add(m); referenceCount++; shadowView.addReference(m.traceX,m.traceY); motion3dView.setData(m,referenceProfile,references,practice);
             repCounter.setText(referenceCount+" / 3  REFERENCE"); haptic();
             if(referenceCount>=3){
-                referenceProfile=average(references); buildReferenceTrace();
+                referenceProfile=average(references); buildReferenceTrace(); motion3dView.setData(m,referenceProfile,references,practice);
                 seriesArmed=false; stage=Stage.READY;
                 stageLabel.setText("STEP 3 OF 3"); title.setText("Central shadow created");
                 instruction.setText("The bright center line is the average of your 3 reference forehands. Now train 10 repetitions over it.");
@@ -314,7 +336,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                 coach.setText("The next reference is accepted only after you return to ready.");
             }
         }else if(stage==Stage.PRACTICE){
-            practice.add(m); practiceCount++; shadowView.endLive(true);
+            practice.add(m); practiceCount++; shadowView.endLive(true); motion3dView.setData(m,referenceProfile,references,practice);
             repCounter.setText(practiceCount+" / 10  TRAINING"); coach.setText(coachFor(m)); session.setText(sessionSummary()); haptic();
             if(practiceCount>=10){
                 seriesArmed=false; stage=Stage.COMPLETE; title.setText("Set complete");
@@ -372,7 +394,9 @@ public class MainActivity extends Activity implements SensorEventListener {
 
         Landmarks lm=detectLandmarks(in,pos,vel,speed,gyroM,accelM,impact,peakGyroIdx,maxSpeed,maxGyro,total);
         float[][] trace=traceFromPositions(pos,64);
-        return new Metrics(total,maxSpeed,maxGyro,maxAccel,pathAngle,forwardPct,upwardPct,followRatio,peakOffsetMs,smoothness,impact,speed,trace[0],trace[1],lm);
+        float[][] trace3=trace3DFromMotion(pos,vel,speed,64);
+        return new Metrics(total,maxSpeed,maxGyro,maxAccel,pathAngle,forwardPct,upwardPct,followRatio,peakOffsetMs,smoothness,impact,speed,trace[0],trace[1],lm,
+            trace3[0],trace3[1],trace3[2],trace3[3],trace3[4]);
     }
 
     Landmarks detectLandmarks(ArrayList<Sample> in,V[] pos,V[] vel,double[] speed,double[] gyroM,double[] accelM,
@@ -440,6 +464,34 @@ public class MainActivity extends Activity implements SensorEventListener {
         return clamp(((t-t0)/1e9)/Math.max(.001,total),0,1);
     }
 
+    float[][] trace3DFromMotion(V[] pos,V[] vel,double[] speed,int points){
+        int n=pos.length;
+        float[] x=new float[points],y=new float[points],z=new float[points],sp=new float[points],lat=new float[points];
+        double maxSpeed=0,maxLat=0; for(int i=0;i<n;i++){maxSpeed=Math.max(maxSpeed,speed[i]);maxLat=Math.max(maxLat,Math.abs(vel[i].x));}
+        for(int j=0;j<points;j++){
+            int idx=(int)Math.round(j*(n-1.0)/Math.max(1,points-1));
+            x[j]=(float)pos[idx].x; y[j]=(float)pos[idx].y; z[j]=(float)pos[idx].z;
+            sp[j]=(float)(speed[idx]/Math.max(.001,maxSpeed));
+            lat[j]=(float)(Math.abs(vel[idx].x)/Math.max(.001,maxLat));
+        }
+        normalizeTrace3D(x,y,z);
+        float[] dummy=new float[x.length];
+        smoothTrace(x,y);
+        smoothTrace(z,dummy); // light smoothing across depth too
+        return new float[][]{x,y,z,sp,lat};
+    }
+
+    void normalizeTrace3D(float[] x,float[] y,float[] z){
+        if(x.length==0)return;
+        float x0=x[0],y0=y[0],z0=z[0],max=0;
+        for(int i=0;i<x.length;i++){
+            x[i]-=x0;y[i]-=y0;z[i]-=z0;
+            max=Math.max(max,Math.max(Math.abs(x[i]),Math.max(Math.abs(y[i]),Math.abs(z[i]))));
+        }
+        if(max<.001f)max=1;
+        for(int i=0;i<x.length;i++){x[i]/=max;y[i]/=max;z[i]/=max;}
+    }
+
     float[][] traceFromPositions(V[] pos,int points){
         int n=pos.length; float[] x=new float[points],y=new float[points];
         for(int j=0;j<points;j++){
@@ -479,7 +531,21 @@ public class MainActivity extends Activity implements SensorEventListener {
         for(Metrics m:list){duration+=m.duration;maxSpeed+=m.maxSpeed;maxGyro+=m.maxGyro;maxAccel+=m.maxAccel;path+=m.pathAngle;forward+=m.forwardPct;upward+=m.upwardPct;follow+=m.followRatio;peak+=m.peakOffsetMs;smooth+=m.smoothness;}
         int n=Math.max(1,list.size());
         Landmarks avgLm=averageLandmarks(list);
-        return new Metrics(duration/n,maxSpeed/n,maxGyro/n,maxAccel/n,path/n,forward/n,upward/n,follow/n,peak/n,smooth/n,0,new double[]{0},new float[64],new float[64],avgLm);
+        float[][] a3=averageTrace3D(list);
+        return new Metrics(duration/n,maxSpeed/n,maxGyro/n,maxAccel/n,path/n,forward/n,upward/n,follow/n,peak/n,smooth/n,0,new double[]{0},new float[64],new float[64],avgLm,
+            a3[0],a3[1],a3[2],a3[3],a3[4]);
+    }
+
+    float[][] averageTrace3D(ArrayList<Metrics> list){
+        int p=64; float[] x=new float[p],y=new float[p],z=new float[p],sp=new float[p],lat=new float[p];
+        int count=0;
+        for(Metrics m:list){
+            if(m.trace3X==null||m.trace3X.length!=p)continue;
+            count++;
+            for(int i=0;i<p;i++){x[i]+=m.trace3X[i];y[i]+=m.trace3Y[i];z[i]+=m.trace3Z[i];sp[i]+=m.speed3N[i];lat[i]+=m.lateralSpeedN[i];}
+        }
+        if(count>0)for(int i=0;i<p;i++){x[i]/=count;y[i]/=count;z[i]/=count;sp[i]/=count;lat[i]/=count;}
+        return new float[][]{x,y,z,sp,lat};
     }
 
     Landmarks averageLandmarks(ArrayList<Metrics> list){
@@ -627,6 +693,143 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
     }
 
+    class Motion3DView extends View{
+        Paint p=new Paint(1);
+        Metrics currentM,refM;
+        final ArrayList<Metrics> refs3=new ArrayList<>(),history3=new ArrayList<>();
+        int mode=0;
+        float yaw=(float)Math.toRadians(-32),pitch=(float)Math.toRadians(20),downX,downY,lastX;
+        boolean rotating=false;
+
+        Motion3DView(Context c){super(c);setFocusable(true);}
+        void setMode(int m){mode=m;yaw=(float)Math.toRadians(-32);pitch=(float)Math.toRadians(20);invalidate();}
+        void setData(Metrics cur,Metrics ref,List<Metrics> refs,List<Metrics> hist){
+            currentM=cur;refM=ref;refs3.clear();history3.clear();
+            if(refs!=null)refs3.addAll(refs);
+            if(hist!=null){int start=Math.max(0,hist.size()-6);for(int i=start;i<hist.size();i++)history3.add(hist.get(i));}
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas c){
+            super.onDraw(c);int w=getWidth(),h=getHeight();
+            String[] names={"PATH 3D","SPEED ALONG PATH","LATERAL SPEED","FORWARD / UP","MOTION VOLUME"};
+            String[] subs={"lateral × up × forward","line thickness = relative speed","sideways speed emphasized","depth vs low-to-high","normalized spread across recent swings"};
+            p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));p.setStyle(Paint.Style.FILL);p.setColor(TEXT);p.setTextSize(dp(15));
+            c.drawText(names[mode],dp(16),dp(26),p);
+            p.setColor(MUTED);p.setTextSize(dp(11));c.drawText(subs[mode],dp(16),dp(44),p);
+
+            RectF box=new RectF(dp(12),dp(54),w-dp(12),h-dp(16));
+            drawAxes(c,box);
+
+            if(currentM==null&&refM==null){
+                p.setTextSize(dp(14));p.setColor(MUTED);c.drawText("3D view appears after your first swing.",dp(24),box.centerY(),p);return;
+            }
+
+            if(mode==4){
+                drawVolume(c,box);
+            }else{
+                if(refM!=null)drawMetricTrace(c,box,refM,REF,dp(2.5f),true);
+                if(currentM!=null)drawMetricTrace(c,box,currentM,ACCENT,dp(3.5f),false);
+                else if(refM!=null)drawMetricTrace(c,box,refM,ACCENT,dp(3.5f),false);
+            }
+            drawLegend(c,box);
+        }
+
+        void drawAxes(Canvas c,RectF b){
+            float[] o=project(0,0,0,b),sx=project(.75f,0,0,b),sy=project(0,.75f,0,b),sz=project(0,0,.75f,b);
+            p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(1));p.setColor(LINE);
+            c.drawLine(o[0],o[1],sx[0],sx[1],p);c.drawLine(o[0],o[1],sy[0],sy[1],p);c.drawLine(o[0],o[1],sz[0],sz[1],p);
+            p.setStyle(Paint.Style.FILL);p.setTextSize(dp(9));p.setColor(MUTED);
+            c.drawText("LATERAL",sx[0]+dp(4),sx[1],p);c.drawText("UP",sy[0]+dp(4),sy[1],p);c.drawText("FORWARD",sz[0]+dp(4),sz[1],p);
+        }
+
+        void drawMetricTrace(Canvas c,RectF b,Metrics m,int color,float baseWidth,boolean ghost){
+            if(m==null||m.trace3X==null||m.trace3X.length<2)return;
+            int n=m.trace3X.length;
+            for(int i=1;i<n;i++){
+                float x0=m.trace3X[i-1],y0=m.trace3Y[i-1],z0=m.trace3Z[i-1];
+                float x1=m.trace3X[i],y1=m.trace3Y[i],z1=m.trace3Z[i];
+                if(mode==2){y0*=.18f;y1*=.18f;}
+                if(mode==3){x0*=.12f;x1*=.12f;}
+                float[] a=project(x0,y0,z0,b),d=project(x1,y1,z1,b);
+                float metric=mode==2?m.lateralSpeedN[Math.min(i,m.lateralSpeedN.length-1)]:m.speed3N[Math.min(i,m.speed3N.length-1)];
+                float width=(mode==1||mode==2)?baseWidth+dp(4)*(float)metric:baseWidth;
+                p.setStyle(Paint.Style.STROKE);p.setStrokeCap(Paint.Cap.ROUND);p.setStrokeWidth(width);
+                p.setColor(ghost?Color.argb(150,Color.red(color),Color.green(color),Color.blue(color)):color);
+                c.drawLine(a[0],a[1],d[0],d[1],p);
+            }
+            int contact=m.lm==null?(int)(n*.65):Math.min(n-1,Math.max(0,(int)Math.round(m.lm.contactT*(n-1))));
+            int peak=m.lm==null?(int)(n*.55):Math.min(n-1,Math.max(0,(int)Math.round(m.lm.peakT*(n-1))));
+            drawMarker(c,b,m,contact,"CONTACT",ghost?REF:TEXT);
+            if(mode==1||mode==2)drawMarker(c,b,m,peak,"PEAK",ACCENT);
+        }
+
+        void drawMarker(Canvas c,RectF b,Metrics m,int idx,String label,int color){
+            if(m.trace3X==null||idx<0||idx>=m.trace3X.length)return;
+            float x=m.trace3X[idx],y=m.trace3Y[idx],z=m.trace3Z[idx];
+            if(mode==2)y*=.18f;if(mode==3)x*=.12f;
+            float[] q=project(x,y,z,b);p.setStyle(Paint.Style.FILL);p.setColor(color);c.drawCircle(q[0],q[1],dp(4),p);
+            p.setTextSize(dp(8));c.drawText(label,q[0]+dp(5),q[1]-dp(5),p);
+        }
+
+        void drawVolume(Canvas c,RectF b){
+            ArrayList<Metrics> all=new ArrayList<>();all.addAll(refs3);all.addAll(history3);if(currentM!=null&&!all.contains(currentM))all.add(currentM);
+            if(all.isEmpty()&&refM!=null)all.add(refM);
+            float minX=9,minY=9,minZ=9,maxX=-9,maxY=-9,maxZ=-9;
+            for(Metrics m:all){
+                if(m.trace3X==null)continue;
+                for(int i=0;i<m.trace3X.length;i++){minX=Math.min(minX,m.trace3X[i]);maxX=Math.max(maxX,m.trace3X[i]);minY=Math.min(minY,m.trace3Y[i]);maxY=Math.max(maxY,m.trace3Y[i]);minZ=Math.min(minZ,m.trace3Z[i]);maxZ=Math.max(maxZ,m.trace3Z[i]);}
+            }
+            drawBox3D(c,b,minX,minY,minZ,maxX,maxY,maxZ);
+            int idx=0;
+            for(Metrics m:all){
+                int a=70+Math.min(100,idx*14);int col=Color.argb(a,190,198,194);
+                drawMetricTrace(c,b,m,col,dp(1.5f),true);idx++;
+            }
+            if(refM!=null)drawMetricTrace(c,b,refM,REF,dp(3),true);
+            if(currentM!=null)drawMetricTrace(c,b,currentM,ACCENT,dp(4),false);
+        }
+
+        void drawBox3D(Canvas c,RectF b,float x0,float y0,float z0,float x1,float y1,float z1){
+            if(x0>x1)return;
+            float[][] v={project(x0,y0,z0,b),project(x1,y0,z0,b),project(x1,y1,z0,b),project(x0,y1,z0,b),
+                         project(x0,y0,z1,b),project(x1,y0,z1,b),project(x1,y1,z1,b),project(x0,y1,z1,b)};
+            int[][] e={{0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
+            p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(1));p.setColor(Color.argb(90,160,171,165));
+            for(int[] ed:e)c.drawLine(v[ed[0]][0],v[ed[0]][1],v[ed[1]][0],v[ed[1]][1],p);
+        }
+
+        void drawLegend(Canvas c,RectF b){
+            p.setStyle(Paint.Style.FILL);p.setTextSize(dp(9));p.setColor(MUTED);
+            if(mode==2)c.drawText("thicker = faster sideways movement",b.left+dp(8),b.bottom-dp(6),p);
+            else if(mode==1)c.drawText("thicker = faster hand motion",b.left+dp(8),b.bottom-dp(6),p);
+            else if(mode==4)c.drawText("smaller envelope = more repeatable movement",b.left+dp(8),b.bottom-dp(6),p);
+            else c.drawText("ghost = reference   •   bright = current",b.left+dp(8),b.bottom-dp(6),p);
+        }
+
+        float[] project(float x,float y,float z,RectF b){
+            double cy=Math.cos(yaw),sy=Math.sin(yaw);
+            double x1=x*cy+z*sy,z1=-x*sy+z*cy;
+            double cp=Math.cos(pitch),sp=Math.sin(pitch);
+            double y1=y*cp-z1*sp,z2=y*sp+z1*cp;
+            double persp=1.0/(1.0+z2*.16);
+            float scale=Math.min(b.width(),b.height())*.34f;
+            return new float[]{(float)(b.centerX()+x1*scale*persp),(float)(b.centerY()-y1*scale*persp)};
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent e){
+            if(e.getAction()==MotionEvent.ACTION_DOWN){downX=e.getX();downY=e.getY();lastX=downX;rotating=false;return true;}
+            if(e.getAction()==MotionEvent.ACTION_MOVE){
+                float dx=e.getX()-lastX,totalX=e.getX()-downX,totalY=e.getY()-downY;
+                if(!rotating&&Math.abs(totalX)>dp(8)&&Math.abs(totalX)>Math.abs(totalY)*1.15f){rotating=true;getParent().requestDisallowInterceptTouchEvent(true);}
+                if(rotating){yaw+=dx*.012f;lastX=e.getX();invalidate();return true;}
+                getParent().requestDisallowInterceptTouchEvent(false);return true;
+            }
+            if(e.getAction()==MotionEvent.ACTION_UP||e.getAction()==MotionEvent.ACTION_CANCEL){getParent().requestDisallowInterceptTouchEvent(false);rotating=false;return true;}
+            return true;
+        }
+    }
+
     class LandmarkTimelineView extends View{
         Paint p=new Paint(1); Metrics m,ref;
         LandmarkTimelineView(Context c){super(c);}
@@ -709,8 +912,11 @@ public class MainActivity extends Activity implements SensorEventListener {
     static class Metrics{
         double duration,maxSpeed,maxGyro,maxAccel,pathAngle,forwardPct,upwardPct,followRatio,peakOffsetMs,smoothness;
         int impact;double[] speed;float[] traceX,traceY;Landmarks lm;
-        Metrics(double a,double b,double c,double d,double e,double f,double g,double h,double i,double j,int k,double[] l,float[] x,float[] y,Landmarks lm0){
+        float[] trace3X,trace3Y,trace3Z,speed3N,lateralSpeedN;
+        Metrics(double a,double b,double c,double d,double e,double f,double g,double h,double i,double j,int k,double[] l,float[] x,float[] y,Landmarks lm0,
+                float[] x3,float[] y3,float[] z3,float[] s3,float[] lat3){
             duration=a;maxSpeed=b;maxGyro=c;maxAccel=d;pathAngle=e;forwardPct=f;upwardPct=g;followRatio=h;peakOffsetMs=i;smoothness=j;impact=k;speed=l;traceX=x;traceY=y;lm=lm0;
+            trace3X=x3;trace3Y=y3;trace3Z=z3;speed3N=s3;lateralSpeedN=lat3;
         }
     }
 
@@ -737,6 +943,12 @@ public class MainActivity extends Activity implements SensorEventListener {
     TextView tv(String s,float sp,int color,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(color);v.setLineSpacing(0,1.15f);if(bold)v.setTypeface(v.getTypeface(),Typeface.BOLD);return v;}
     View card(View child){LinearLayout c=new LinearLayout(this);c.setPadding(dp(16),dp(15),dp(16),dp(15));c.setBackground(roundRect(SURFACE,16,LINE,1));c.addView(child);return c;}
     View chip(View child){LinearLayout c=new LinearLayout(this);c.setPadding(dp(14),dp(12),dp(14),dp(12));c.setBackground(roundRect(SURFACE,999,LINE,1));c.addView(child);return c;}
+    Button modeButton(String s){
+        Button b=new Button(this);b.setText(s);b.setTextSize(11);b.setTypeface(b.getTypeface(),Typeface.BOLD);b.setMinHeight(dp(40));b.setTextColor(TEXT);
+        GradientDrawable g=new GradientDrawable();g.setCornerRadius(dp(14));g.setColor(SURFACE);g.setStroke(dp(1),LINE);b.setBackground(g);
+        b.setPadding(dp(12),0,dp(12),0);return b;
+    }
+
     Button button(String s,boolean primaryStyle){Button b=new Button(this);b.setText(s);b.setTextSize(15);b.setTypeface(b.getTypeface(),Typeface.BOLD);b.setMinHeight(dp(56));b.setTextColor(primaryStyle?BG:TEXT);GradientDrawable g=new GradientDrawable();g.setCornerRadius(dp(16));g.setColor(primaryStyle?ACCENT:SURFACE);g.setStroke(dp(1),primaryStyle?ACCENT:LINE);b.setBackground(g);return b;}
     Space space(int d){Space s=new Space(this);s.setLayoutParams(new LinearLayout.LayoutParams(1,dp(d)));return s;}int dp(int v){return(int)(v*getResources().getDisplayMetrics().density+.5f);}
 }
