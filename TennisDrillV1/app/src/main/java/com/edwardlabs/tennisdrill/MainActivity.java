@@ -728,9 +728,9 @@ public class MainActivity extends Activity implements SensorEventListener {
             if(mode==4){
                 drawVolume(c,box);
             }else{
-                if(refM!=null)drawMetricTrace(c,box,refM,REF,dp(2.5f),true);
-                if(currentM!=null)drawMetricTrace(c,box,currentM,ACCENT,dp(3.5f),false);
-                else if(refM!=null)drawMetricTrace(c,box,refM,ACCENT,dp(3.5f),false);
+                if(refM!=null)drawMetricTrace(c,box,refM,REF,dpf(2.5f),true);
+                if(currentM!=null)drawMetricTrace(c,box,currentM,ACCENT,dpf(3.5f),false);
+                else if(refM!=null)drawMetricTrace(c,box,refM,ACCENT,dpf(3.5f),false);
             }
             drawLegend(c,box);
         }
@@ -784,7 +784,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             int idx=0;
             for(Metrics m:all){
                 int a=70+Math.min(100,idx*14);int col=Color.argb(a,190,198,194);
-                drawMetricTrace(c,b,m,col,dp(1.5f),true);idx++;
+                drawMetricTrace(c,b,m,col,dpf(1.5f),true);idx++;
             }
             if(refM!=null)drawMetricTrace(c,b,refM,REF,dp(3),true);
             if(currentM!=null)drawMetricTrace(c,b,currentM,ACCENT,dp(4),false);
@@ -950,5 +950,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     Button button(String s,boolean primaryStyle){Button b=new Button(this);b.setText(s);b.setTextSize(15);b.setTypeface(b.getTypeface(),Typeface.BOLD);b.setMinHeight(dp(56));b.setTextColor(primaryStyle?BG:TEXT);GradientDrawable g=new GradientDrawable();g.setCornerRadius(dp(16));g.setColor(primaryStyle?ACCENT:SURFACE);g.setStroke(dp(1),primaryStyle?ACCENT:LINE);b.setBackground(g);return b;}
-    Space space(int d){Space s=new Space(this);s.setLayoutParams(new LinearLayout.LayoutParams(1,dp(d)));return s;}int dp(int v){return(int)(v*getResources().getDisplayMetrics().density+.5f);}
+    Space space(int d){Space s=new Space(this);s.setLayoutParams(new LinearLayout.LayoutParams(1,dp(d)));return s;}
+    float dpf(float v){return v*getResources().getDisplayMetrics().density;}
+    int dp(int v){return(int)(v*getResources().getDisplayMetrics().density+.5f);}
 }
