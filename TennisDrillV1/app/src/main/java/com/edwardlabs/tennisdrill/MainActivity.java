@@ -18,8 +18,8 @@ public class MainActivity extends Activity implements SensorEventListener {
     enum Stage { BASELINE, LEARN, READY, PRACTICE, COMPLETE }
 
     SensorManager sm; Sensor lin, gyro, rot;
-    TextView stageLabel,title,instruction,live,repCounter,metrics,coach,session,learnHint,readyState;
-    Button primary;
+    TextView stageLabel,title,instruction,live,repCounter,metrics,coach,session,learnHint,readyState,proStatus;
+    Button primary,proStart;
     ProgressBar progress;
     ShadowView shadowView;
     MotionBalanceView balanceView;
@@ -27,9 +27,9 @@ public class MainActivity extends Activity implements SensorEventListener {
     Motion3DView motion3dView;
 
     Stage stage=Stage.BASELINE;
-    boolean baselineRunning=false,seriesArmed=false,recording=false,waitingForReady=true;
-    int referenceCount=0,practiceCount=0,baselineN=0;
-    long baselineStart=0,recordStart=0,quietStart=0,readyStableStart=0,lastSwingEnd=0;
+    boolean baselineRunning=false,seriesArmed=false,recording=false,waitingForReady=true,proMode=false,proSelected=false;
+    int referenceCount=0,practiceCount=0,baselineN=0,proPreset=0;
+    long baselineStart=0,recordStart=0,quietStart=0,readyStableStart=0,lastSwingEnd=0,proGuideStart=0;
 
     final float[] aBias=new float[3],gBias=new float[3],lastA=new float[3],lastG=new float[3],
         lastR=new float[9],baseR=new float[9],swingBaseR=new float[9];
@@ -72,12 +72,30 @@ public class MainActivity extends Activity implements SensorEventListener {
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(18),dp(18),dp(18),dp(38));
         scroll.addView(root,new ScrollView.LayoutParams(-1,-2));
 
-        root.addView(tv("TENNIS DRILL  V3.5",12,MUTED,true));
+        root.addView(tv("TENNIS DRILL  V3.6",12,MUTED,true));
         root.addView(tv("Shadow Forehand",32,TEXT,true));
         root.addView(tv("Move. Compare. Learn.",15,MUTED,false));
 
         TextView safety=tv("Screen toward you • secure grip • clear the area",11,MUTED,false);
         safety.setPadding(0,dp(8),0,0); root.addView(safety);
+
+        root.addView(space(18));
+        root.addView(tv("PRO SHADOW DRILLS",12,MUTED,true));
+        proStatus=tv("Choose a professional-inspired slow-motion template.",14,TEXT,false);
+        proStatus.setPadding(0,dp(5),0,dp(8)); root.addView(proStatus);
+
+        HorizontalScrollView proScroll=new HorizontalScrollView(this); proScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout proRow=new LinearLayout(this); proRow.setOrientation(LinearLayout.HORIZONTAL);
+        String[] proNames={"CLASSIC / THROUGH","HEAVY TOPSPIN","COMPACT MODERN"};
+        for(int i=0;i<proNames.length;i++){
+            final int pi=i; Button pb=modeButton(proNames[i]);
+            pb.setOnClickListener(v->selectProPreset(pi));
+            LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-2,dp(44));pp.setMargins(0,0,dp(8),0);proRow.addView(pb,pp);
+        }
+        proScroll.addView(proRow,new HorizontalScrollView.LayoutParams(-2,-2));
+        root.addView(proScroll,new LinearLayout.LayoutParams(-1,dp(48)));
+        proStart=button("START PRO SHADOW",false); proStart.setOnClickListener(v->startProShadow());
+        root.addView(proStart);
 
         root.addView(space(18));
         stageLabel=tv("STEP 1 OF 3",12,MUTED,true); root.addView(stageLabel);
@@ -154,7 +172,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         if(stage==Stage.BASELINE)beginBaseline();
         else if(stage==Stage.LEARN)startReferenceSet();
         else if(stage==Stage.READY)startPracticeSet();
-        else if(stage==Stage.COMPLETE)resetPractice();
+        else if(stage==Stage.COMPLETE){if(proMode)startProShadow();else resetPractice();}
     }
 
     void beginBaseline(){
@@ -178,11 +196,74 @@ public class MainActivity extends Activity implements SensorEventListener {
         instruction.setText("Do 3 complete slow forehands. After each finish, return to the same ready position. The app waits for ready before accepting the next swing.");
         primary.setText("START 3 REFERENCE SWINGS"); primary.setEnabled(true); primary.setAlpha(1f);
         repCounter.setText("0 / 3  REFERENCE");
-        coach.setText("Watch the line: each swing builds your central shadow.");
+        coach.setText("Watch the line: each swing builds your central shadow."); proStart.setEnabled(true); proStart.setAlpha(1f);
+    }
+
+    void selectProPreset(int preset){
+        proPreset=preset;proSelected=true;
+        String[] names={"CLASSIC / THROUGH","HEAVY TOPSPIN","COMPACT MODERN"};
+        String[] descriptions={
+            "Federer-inspired classic template: longer forward extension and a moderate low-to-high finish.",
+            "Nadal-inspired heavy-topspin template: stronger low-to-high component and higher finish.",
+            "Djokovic-inspired compact-modern template: shorter takeback, efficient forward drive and controlled finish."
+        };
+        proStatus.setText(names[preset]+"\n"+descriptions[preset]+"\nTemplate is normalized and inspired by professional stroke patterns — not official athlete motion capture.");
+        float[][] t=buildProTemplate(preset);
+        shadowView.setProTemplate(t[0],t[1],false);
+    }
+
+    void startProShadow(){
+        if(!proSelected)selectProPreset(0);
+        if(stage==Stage.BASELINE){
+            coach.setText("Calibrate READY first, then start the Pro Shadow drill.");
+            beginBaseline();return;
+        }
+        proMode=true;practice.clear();practiceCount=0;latest=null;current.clear();
+        float[][] t=buildProTemplate(proPreset);
+        referenceX=t[0];referenceY=t[1];
+        referenceProfile=buildProReferenceProfile(proPreset,t);
+        seriesArmed=true;recording=false;waitingForReady=true;readyStableStart=0;stage=Stage.PRACTICE;
+        stageLabel.setText("PRO SHADOW");title.setText("Settle into READY");
+        instruction.setText("Follow the moving guide slowly. The ghost shows a normalized professional-inspired stroke pattern.");
+        primary.setEnabled(false);primary.setAlpha(.35f);primary.setText("PRO DRILL ACTIVE");
+        repCounter.setText("0 / 8  PRO SHADOW");
+        readyState.setText("●  SETTLE INTO READY");readyState.setTextColor(MUTED);
+        coach.setText("Trace the ghost slowly. Prioritize shape and sequence over speed.");
+        shadowView.setProTemplate(referenceX,referenceY,true);
+        balanceView.setMetrics(null,referenceProfile);landmarkView.setMetrics(null,referenceProfile);motion3dView.setData(null,referenceProfile,references,practice);
+    }
+
+    float[][] buildProTemplate(int preset){
+        int n=64;float[] x=new float[n],y=new float[n];
+        for(int i=0;i<n;i++){
+            double t=i/(double)(n-1);
+            // x is normalized forward dimension on the 2D shadow; negative region represents takeback.
+            if(preset==0){
+                x[i]=(float)(-.44*Math.sin(Math.PI*Math.min(t/.32,1))*((t<.32)?1:0) + .95*Math.pow(Math.max(0,(t-.28)/.72),.88));
+                y[i]=(float)(-.16*Math.sin(Math.PI*Math.min(t/.30,1))*((t<.30)?1:0) + .62*Math.pow(Math.max(0,(t-.30)/.70),1.15));
+            }else if(preset==1){
+                x[i]=(float)(-.38*Math.sin(Math.PI*Math.min(t/.30,1))*((t<.30)?1:0) + .72*Math.pow(Math.max(0,(t-.26)/.74),.95));
+                y[i]=(float)(-.22*Math.sin(Math.PI*Math.min(t/.28,1))*((t<.28)?1:0) + 1.00*Math.pow(Math.max(0,(t-.25)/.75),.95));
+            }else{
+                x[i]=(float)(-.28*Math.sin(Math.PI*Math.min(t/.25,1))*((t<.25)?1:0) + .88*Math.pow(Math.max(0,(t-.22)/.78),.82));
+                y[i]=(float)(-.10*Math.sin(Math.PI*Math.min(t/.24,1))*((t<.24)?1:0) + .68*Math.pow(Math.max(0,(t-.24)/.76),1.05));
+            }
+        }
+        normalizeTrace(x,y);smoothTrace(x,y);return new float[][]{x,y};
+    }
+
+    Metrics buildProReferenceProfile(int preset,float[][] t){
+        double forward=preset==1?48:(preset==0?68:63);
+        double upward=100-forward;
+        double path=preset==1?34:(preset==0?21:25);
+        Landmarks lm=new Landmarks();lm.takebackT=preset==2?.22:.28;lm.driveT=preset==2?.38:.43;lm.peakT=.63;lm.contactT=.69;lm.followT=.94;
+        float[] x3=new float[64],y3=new float[64],z3=new float[64],s3=new float[64],lat3=new float[64];
+        for(int i=0;i<64;i++){x3[i]=(float)(.18*Math.sin(i/63.0*Math.PI));y3[i]=t[1][i];z3[i]=t[0][i];double q=i/63.0;s3[i]=(float)Math.exp(-Math.pow((q-.64)/.22,2));lat3[i]=(float)Math.abs(Math.sin(q*Math.PI));}
+        return new Metrics(3.2,1,4,6,path,forward,upward,.30,0,86,43,new double[]{0},t[0],t[1],lm,x3,y3,z3,s3,lat3);
     }
 
     void startReferenceSet(){
-        references.clear(); referenceCount=0; practiceCount=0; latest=null; referenceX=null; referenceY=null;
+        proMode=false;references.clear(); referenceCount=0; practiceCount=0; latest=null; referenceX=null; referenceY=null;
         current.clear(); seriesArmed=true; recording=false; waitingForReady=true; readyStableStart=0; stage=Stage.LEARN; readyState.setText("●  SETTLE INTO READY"); readyState.setTextColor(MUTED);
         primary.setEnabled(false); primary.setAlpha(.45f); primary.setText("LISTENING…");
         title.setText("Return to READY first"); instruction.setText("When ready is stable, the app arms automatically. Then perform one full slow forehand.");
@@ -191,7 +272,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     void startPracticeSet(){
-        practice.clear(); practiceCount=0; latest=null; current.clear();
+        proMode=false;practice.clear(); practiceCount=0; latest=null; current.clear();
         seriesArmed=true; recording=false; waitingForReady=true; readyStableStart=0; stage=Stage.PRACTICE; readyState.setText("●  SETTLE INTO READY"); readyState.setTextColor(MUTED);
         stageLabel.setText("STEP 3 OF 3"); title.setText("Return to READY");
         instruction.setText("Do 10 natural forehands. Your live line is drawn over the central reference.");
@@ -244,7 +325,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                     System.arraycopy(lastR,0,swingBaseR,0,9);
                     current.clear();
                     readyState.setText("●  READY ✓   SWING");
-                    readyState.setTextColor(ACCENT); pulseReady();
+                    readyState.setTextColor(ACCENT); pulseReady(); if(proMode){proGuideStart=System.nanoTime();shadowView.startProGuide(3200);}
                     title.setText(stage==Stage.LEARN?"READY ✓ — make the reference swing":"READY ✓ — swing "+(practiceCount+1));
                     shadowView.beginLive();
                 }else{
@@ -263,7 +344,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             // Keep a short pre-roll after READY so takeback is not cut off.
             addSample(now);
             while(current.size()>160) current.remove(0);
-            if(am>1.35 || gm>0.72){
+            if(am>(proMode?0.85:1.35) || gm>(proMode?0.48:0.72)){
                 recording=true;
                 recordStart=current.isEmpty()?now:current.get(0).t;
                 quietStart=0;
@@ -276,11 +357,11 @@ public class MainActivity extends Activity implements SensorEventListener {
             shadowView.setLive(buildLiveTrace(current));
             long elapsed=now-recordStart;
             boolean quiet=am<0.85 && gm<0.50;
-            if(quiet && elapsed>420_000_000L){
+            if(quiet && elapsed>(proMode?650_000_000L:420_000_000L)){
                 if(quietStart==0)quietStart=now;
-                if(now-quietStart>240_000_000L)finishDetectedSwing();
+                if(now-quietStart>(proMode?360_000_000L:240_000_000L))finishDetectedSwing();
             }else quietStart=0;
-            if(elapsed>2_650_000_000L)finishDetectedSwing();
+            if(elapsed>(proMode?4_200_000_000L:2_650_000_000L))finishDetectedSwing();
         }
     }
 
@@ -337,13 +418,13 @@ public class MainActivity extends Activity implements SensorEventListener {
             }
         }else if(stage==Stage.PRACTICE){
             practice.add(m); practiceCount++; shadowView.endLive(true); motion3dView.setData(m,referenceProfile,references,practice);
-            repCounter.setText(practiceCount+" / 10  TRAINING"); coach.setText(coachFor(m)); session.setText(sessionSummary()); haptic();
-            if(practiceCount>=10){
+            repCounter.setText(practiceCount+(proMode?" / 8  PRO SHADOW":" / 10  TRAINING")); coach.setText(proMode?proCoachFor(m):coachFor(m)); session.setText(sessionSummary()); haptic();
+            if(practiceCount>=(proMode?8:10)){
                 seriesArmed=false; stage=Stage.COMPLETE; title.setText("Set complete");
-                instruction.setText("Compare the live traces with your central shadow and the Forward / Upward balance.");
-                primary.setText("START ANOTHER SET"); primary.setEnabled(true); primary.setAlpha(1f);
-                coach.setText(finalFocus());
-            }else title.setText("Swing "+practiceCount+" captured — return to READY");
+                instruction.setText(proMode?"Review how closely your motion followed the professional-inspired ghost.":"Compare the live traces with your central shadow and the Forward / Upward balance.");
+                primary.setText(proMode?"REPEAT PRO DRILL":"START ANOTHER SET"); primary.setEnabled(true); primary.setAlpha(1f);
+                coach.setText(proMode?proFinalFocus():finalFocus());
+            }else title.setText((proMode?"Pro shadow ":"Swing ")+practiceCount+" captured — return to READY");
         }
     }
 
@@ -562,6 +643,24 @@ public class MainActivity extends Activity implements SensorEventListener {
         return out;
     }
 
+    String proCoachFor(Metrics m){
+        double d=traceDistance(m.traceX,m.traceY,referenceX,referenceY);
+        double match=100-clamp(d*135,0,100);
+        if(match<55)return String.format(Locale.US,"Shadow match %.0f%%. Slow down and trace the ghost shape before adding speed.",match);
+        if(m.lm!=null&&referenceProfile!=null&&referenceProfile.lm!=null){
+            double timing=Math.abs(m.lm.contactT-referenceProfile.lm.contactT);
+            if(timing>.11)return String.format(Locale.US,"Shadow match %.0f%%. Shape is improving; synchronize contact with the guide.",match);
+        }
+        if(match<75)return String.format(Locale.US,"Shadow match %.0f%%. Good. Now keep the same path through the finish.",match);
+        return String.format(Locale.US,"Shadow match %.0f%%. Excellent slow repetition — repeat the same sequence.",match);
+    }
+
+    String proFinalFocus(){
+        if(practice.isEmpty())return "Complete the Pro Shadow set.";
+        double sum=0;for(Metrics m:practice)sum+=100-clamp(traceDistance(m.traceX,m.traceY,referenceX,referenceY)*135,0,100);
+        return String.format(Locale.US,"Average Pro Shadow match %.0f%%. Repeat slowly until the ghost feels natural.",sum/practice.size());
+    }
+
     String coachFor(Metrics m){
         if(referenceProfile!=null){
             double shape=traceDistance(m.traceX,m.traceY,referenceX,referenceY);
@@ -637,14 +736,17 @@ public class MainActivity extends Activity implements SensorEventListener {
     class ShadowView extends View{
         Paint p=new Paint(1);
         final ArrayList<float[][]> refs=new ArrayList<>();
-        float[] centerX,centerY,liveX,liveY,lastX,lastY;
-        boolean practiceMode=false;
+        float[] centerX,centerY,liveX,liveY,lastX,lastY,proX,proY;
+        boolean practiceMode=false,proActive=false,proGuideActive=false;
+        long proGuideStartLocal=0;int proGuideDurationMs=3200;
 
         ShadowView(Context c){super(c);}
-        void resetAll(){refs.clear();centerX=centerY=liveX=liveY=lastX=lastY=null;practiceMode=false;invalidate();}
+        void resetAll(){refs.clear();centerX=centerY=liveX=liveY=lastX=lastY=proX=proY=null;practiceMode=false;proActive=false;proGuideActive=false;invalidate();}
         void addReference(float[] x,float[] y){refs.add(new float[][]{x.clone(),y.clone()});lastX=x;lastY=y;liveX=liveY=null;invalidate();}
         void startPractice(float[] x,float[] y){centerX=x;centerY=y;practiceMode=true;liveX=liveY=lastX=lastY=null;invalidate();}
         void beginLive(){liveX=liveY=null;invalidate();}
+        void setProTemplate(float[] x,float[] y,boolean active){proX=x==null?null:x.clone();proY=y==null?null:y.clone();proActive=active;invalidate();}
+        void startProGuide(int durationMs){proGuideDurationMs=durationMs;proGuideStartLocal=SystemClock.uptimeMillis();proGuideActive=true;invalidate();}
         void setLive(float[][] a){if(a!=null){liveX=a[0];liveY=a[1];invalidate();}}
         void endLive(boolean keep){if(keep&&liveX!=null){lastX=liveX;lastY=liveY;}liveX=liveY=null;invalidate();}
 
@@ -656,7 +758,9 @@ public class MainActivity extends Activity implements SensorEventListener {
             p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(1));p.setColor(LINE);c.drawRoundRect(box,dp(10),dp(10),p);
             p.setStrokeWidth(dp(1));c.drawLine(box.centerX(),box.top+8,box.centerX(),box.bottom-8,p);c.drawLine(box.left+8,box.centerY(),box.right-8,box.centerY(),p);
 
-            if(!practiceMode){
+            if(proActive&&proX!=null){
+                drawTrace(c,box,proX,proY,REF,dp(5));
+            }else if(!practiceMode){
                 int idx=0; for(float[][] r:refs){drawTrace(c,box,r[0],r[1],Color.rgb(105+idx*25,115+idx*25,110+idx*25),dp(2));idx++;}
                 if(refs.size()>=2){
                     float[][] avg=averageRefs(); drawTrace(c,box,avg[0],avg[1],ACCENT,dp(4));
@@ -665,6 +769,14 @@ public class MainActivity extends Activity implements SensorEventListener {
 
             if(lastX!=null)drawTrace(c,box,lastX,lastY,Color.rgb(110,130,120),dp(2));
             if(liveX!=null)drawTrace(c,box,liveX,liveY,ACCENT,dp(4));
+            if(proActive&&proGuideActive&&proX!=null){
+                float u=(SystemClock.uptimeMillis()-proGuideStartLocal)/(float)Math.max(1,proGuideDurationMs);
+                if(u>=1f){u=1f;proGuideActive=false;}else postInvalidateOnAnimation();
+                int gi=Math.max(0,Math.min(proX.length-1,(int)(u*(proX.length-1))));
+                float gx=box.centerX()+proX[gi]*(box.width()*.38f),gy=box.centerY()-proY[gi]*(box.height()*.38f);
+                p.setStyle(Paint.Style.FILL);p.setColor(ACCENT);c.drawCircle(gx,gy,dp(7),p);
+                p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(1));p.setColor(Color.argb(110,216,255,87));c.drawCircle(gx,gy,dp(13),p);
+            }
 
             p.setStyle(Paint.Style.FILL);p.setTextSize(dp(10));p.setColor(MUTED);
             c.drawText("START",box.left+dp(10),box.bottom-dp(10),p);
