@@ -25,6 +25,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     MotionBalanceView balanceView;
     LandmarkTimelineView landmarkView;
     Motion3DView motion3dView;
+    ReplayView replayView;
 
     Stage stage=Stage.BASELINE;
     boolean baselineRunning=false,seriesArmed=false,recording=false,waitingForReady=true,proMode=false,proSelected=false;
@@ -55,7 +56,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         super.onResume();
         registerSensorSafely(lin); registerSensorSafely(gyro); registerSensorSafely(rot);
     }
-    @Override protected void onPause(){ if(sm!=null) sm.unregisterListener(this); super.onPause(); }
+    @Override protected void onPause(){ if(sm!=null) sm.unregisterListener(this); if(replayView!=null)replayView.pauseReplay(); super.onPause(); }
 
     void registerSensorSafely(Sensor sensor){
         if(sensor==null)return;
@@ -72,7 +73,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(18),dp(18),dp(18),dp(38));
         scroll.addView(root,new ScrollView.LayoutParams(-1,-2));
 
-        root.addView(tv("TENNIS DRILL  V3.6",12,MUTED,true));
+        root.addView(tv("TENNIS DRILL  V3.7",12,MUTED,true));
         root.addView(tv("Shadow Forehand",32,TEXT,true));
         root.addView(tv("Move. Compare. Learn.",15,MUTED,false));
 
@@ -152,6 +153,47 @@ public class MainActivity extends Activity implements SensorEventListener {
         root.addView(modeScroll,new LinearLayout.LayoutParams(-1,dp(58)));
         TextView rotateHint=tv("Horizontal drag rotates the 3D view • all paths are normalized motion estimates",11,MUTED,false);
         rotateHint.setPadding(dp(4),dp(3),0,0); root.addView(rotateHint);
+
+        root.addView(space(18));
+        root.addView(tv("MOTION REPLAY",12,MUTED,true));
+        replayView=new ReplayView(this); replayView.setBackground(roundRect(SURFACE,18,LINE,1));
+        root.addView(replayView,new LinearLayout.LayoutParams(-1,dp(430)));
+
+        HorizontalScrollView replayModeScroll=new HorizontalScrollView(this); replayModeScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout replayModeRow=new LinearLayout(this); replayModeRow.setOrientation(LinearLayout.HORIZONTAL);
+        String[] replayModes={"2D SKELETON","3D SKELETON","GHOST","MIRROR"};
+        for(int i=0;i<replayModes.length;i++){
+            final int ri=i;Button rb=modeButton(replayModes[i]);
+            rb.setOnClickListener(v->{
+                if(ri==0)replayView.set3D(false);
+                else if(ri==1)replayView.set3D(true);
+                else if(ri==2)replayView.toggleGhost();
+                else replayView.toggleMirror();
+            });
+            LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-2,dp(44));rp.setMargins(0,dp(8),dp(8),0);replayModeRow.addView(rb,rp);
+        }
+        replayModeScroll.addView(replayModeRow,new HorizontalScrollView.LayoutParams(-2,-2));
+        root.addView(replayModeScroll,new LinearLayout.LayoutParams(-1,dp(58)));
+
+        HorizontalScrollView replayCtlScroll=new HorizontalScrollView(this); replayCtlScroll.setHorizontalScrollBarEnabled(false);
+        LinearLayout replayCtlRow=new LinearLayout(this); replayCtlRow.setOrientation(LinearLayout.HORIZONTAL);
+        String[] ctlNames={"◀ FRAME","PLAY / PAUSE","FRAME ▶","0.25×","0.5×","1×"};
+        for(int i=0;i<ctlNames.length;i++){
+            final int ci=i;Button cb=modeButton(ctlNames[i]);
+            cb.setOnClickListener(v->{
+                if(ci==0)replayView.stepFrame(-1);
+                else if(ci==1)replayView.togglePlay();
+                else if(ci==2)replayView.stepFrame(1);
+                else if(ci==3)replayView.setReplaySpeed(.25f);
+                else if(ci==4)replayView.setReplaySpeed(.5f);
+                else replayView.setReplaySpeed(1f);
+            });
+            LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-2,dp(44));cp.setMargins(0,0,dp(8),0);replayCtlRow.addView(cb,cp);
+        }
+        replayCtlScroll.addView(replayCtlRow,new HorizontalScrollView.LayoutParams(-2,-2));
+        root.addView(replayCtlScroll,new LinearLayout.LayoutParams(-1,dp(50)));
+        TextView replayLegend=tv("ACCENT = measured hand/racket • gray = inferred body • drag 3D view to rotate",11,MUTED,false);
+        replayLegend.setPadding(dp(4),dp(2),0,0);root.addView(replayLegend);
 
         root.addView(space(16));
         root.addView(tv("LATEST SWING",12,MUTED,true));
@@ -399,13 +441,13 @@ public class MainActivity extends Activity implements SensorEventListener {
         if(current.size()<14){current.clear();title.setText("Too short — return to READY");shadowView.endLive(false);return;}
         Metrics m=analyze(current); current.clear();
         if(m==null){title.setText("Could not analyze — return to READY");shadowView.endLive(false);return;}
-        latest=m; metrics.setText(formatMetrics(m)); balanceView.setMetrics(m,referenceProfile); landmarkView.setMetrics(m,referenceProfile); motion3dView.setData(m,referenceProfile,references,practice);
+        latest=m; metrics.setText(formatMetrics(m)); balanceView.setMetrics(m,referenceProfile); landmarkView.setMetrics(m,referenceProfile); motion3dView.setData(m,referenceProfile,references,practice); replayView.setSwing(m,referenceProfile);
 
         if(stage==Stage.LEARN){
             references.add(m); referenceCount++; shadowView.addReference(m.traceX,m.traceY); motion3dView.setData(m,referenceProfile,references,practice);
             repCounter.setText(referenceCount+" / 3  REFERENCE"); haptic();
             if(referenceCount>=3){
-                referenceProfile=average(references); buildReferenceTrace(); motion3dView.setData(m,referenceProfile,references,practice);
+                referenceProfile=average(references); buildReferenceTrace(); motion3dView.setData(m,referenceProfile,references,practice); replayView.setSwing(m,referenceProfile);
                 seriesArmed=false; stage=Stage.READY;
                 stageLabel.setText("STEP 3 OF 3"); title.setText("Central shadow created");
                 instruction.setText("The bright center line is the average of your 3 reference forehands. Now train 10 repetitions over it.");
@@ -804,6 +846,265 @@ public class MainActivity extends Activity implements SensorEventListener {
             p.setStyle(Paint.Style.FILL);p.setColor(color);c.drawCircle(px[0],py[0],dp(3),p);c.drawCircle(px[px.length-1],py[py.length-1],dp(4),p);
         }
     }
+
+    class ReplayView extends View{
+        static final int PELVIS=0,SPINE=1,CHEST=2,NECK=3,HEAD=4,
+            LSH=5,RSH=6,LEL=7,REL=8,LWR=9,RWR=10,LHAND=11,RHAND=12,
+            LHIP=13,RHIP=14,LKNEE=15,RKNEE=16,LANK=17,RANK=18,LHEEL=19,RHEEL=20,LTOE=21,RTOE=22,
+            RACKET_BASE=23,RACKET_TIP=24;
+        Paint p=new Paint(1);
+        Metrics m,ghostM;
+        boolean view3D=false,showGhost=false,mirrored=false,playing=false,rotating=false;
+        float replaySpeed=.5f,playU=0,yaw=(float)Math.toRadians(-28),pitch=(float)Math.toRadians(10),touchX,touchY,lastTouchX;
+        long playStartMs=0;
+        Handler handler=new Handler(Looper.getMainLooper());
+
+        ReplayView(Context c){super(c);setFocusable(true);}
+        void setSwing(Metrics mm,Metrics gg){m=mm;ghostM=gg;playU=0;playing=false;invalidate();}
+        void set3D(boolean v){view3D=v;invalidate();}
+        void toggleGhost(){showGhost=!showGhost;invalidate();}
+        void toggleMirror(){mirrored=!mirrored;invalidate();}
+        void setReplaySpeed(float s){syncPlayU();replaySpeed=s;if(playing)playStartMs=SystemClock.uptimeMillis();invalidate();}
+        void togglePlay(){if(m==null)return;if(playing){syncPlayU();playing=false;}else{if(playU>=.999f)playU=0;playing=true;playStartMs=SystemClock.uptimeMillis();postInvalidateOnAnimation();}}
+        void pauseReplay(){if(playing){syncPlayU();playing=false;}}
+        void stepFrame(int dir){pauseReplay();playU=(float)clamp(playU+dir/63.0,0,1);invalidate();}
+        void syncPlayU(){
+            if(!playing||m==null)return;
+            long now=SystemClock.uptimeMillis();
+            double dur=Math.max(.7,m.duration)*1000.0;
+            playU=(float)clamp(playU+(now-playStartMs)*replaySpeed/dur,0,1);
+            playStartMs=now;
+        }
+
+        @Override protected void onDraw(Canvas c){
+            super.onDraw(c);int w=getWidth(),h=getHeight();
+            if(playing&&m!=null){
+                long now=SystemClock.uptimeMillis();double dur=Math.max(.7,m.duration)*1000.0;
+                float u=(float)clamp(playU+(now-playStartMs)*replaySpeed/dur,0,1);
+                if(u>=1){playU=1;playing=false;}else postInvalidateOnAnimation();
+                drawReplay(c,w,h,u);
+            }else drawReplay(c,w,h,playU);
+        }
+
+        void drawReplay(Canvas c,int w,int h,float u){
+            p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));p.setStyle(Paint.Style.FILL);
+            p.setTextSize(dp(15));p.setColor(TEXT);c.drawText(view3D?"3D BIOMECHANIC REPLAY":"2D BIOMECHANIC REPLAY",dp(16),dp(26),p);
+            p.setTextSize(dp(11));p.setColor(MUTED);
+            String phase=phaseName(m,u);
+            c.drawText(String.format(Locale.US,"%s   •   %.2f×   •   frame %d / 64",phase,replaySpeed,Math.min(64,1+(int)(u*63))),dp(16),dp(44),p);
+
+            RectF box=new RectF(dp(12),dp(56),w-dp(12),h-dp(28));
+            drawGround(c,box);
+            if(m==null){
+                p.setTextSize(dp(14));p.setColor(MUTED);c.drawText("Complete a swing to unlock 2D / 3D replay.",dp(24),box.centerY(),p);return;
+            }
+            if(showGhost&&ghostM!=null){
+                P3[] gr=rigFor(ghostM,u);
+                drawRig(c,box,gr,Color.argb(85,190,198,194),Color.argb(90,190,198,194),false);
+            }
+            P3[] rig=rigFor(m,u);
+            drawTrail(c,box,m,u);
+            drawRig(c,box,rig,REF,ACCENT,true);
+            drawMeasuredBadge(c,box);
+        }
+
+        void drawMeasuredBadge(Canvas c,RectF box){
+            p.setStyle(Paint.Style.FILL);p.setTextSize(dp(9));p.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.BOLD));
+            p.setColor(ACCENT);c.drawText("MEASURED  hand + racket path",box.left+dp(8),box.bottom-dp(6),p);
+            float tw=p.measureText("MEASURED  hand + racket path");
+            p.setColor(MUTED);c.drawText("  •  INFERRED  body rig",box.left+dp(8)+tw,box.bottom-dp(6),p);
+        }
+
+        void drawGround(Canvas c,RectF box){
+            p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(1));p.setColor(LINE);
+            if(view3D){
+                for(int i=-3;i<=3;i++){
+                    float[] a=project(new P3(i*.28f,0,-.75f),box),b=project(new P3(i*.28f,0,.75f),box);
+                    c.drawLine(a[0],a[1],b[0],b[1],p);
+                }
+                for(int j=-3;j<=3;j++){
+                    float[] a=project(new P3(-.85f,0,j*.25f),box),b=project(new P3(.85f,0,j*.25f),box);
+                    c.drawLine(a[0],a[1],b[0],b[1],p);
+                }
+            }else{
+                float gy=box.bottom-dp(38);c.drawLine(box.left+dp(8),gy,box.right-dp(8),gy,p);
+            }
+        }
+
+        P3[] rigFor(Metrics mm,float u){
+            P3[] j=new P3[25];
+            if(mm==null)return j;
+            int n=mm.trace3X==null?0:mm.trace3X.length;
+            int idx=n==0?0:Math.min(n-1,Math.max(0,(int)Math.round(u*(n-1))));
+            float hx=n==0?0:mm.trace3X[idx],hy=n==0?0:mm.trace3Y[idx],hz=n==0?0:mm.trace3Z[idx];
+
+            Landmarks lm=mm.lm;
+            float take=(float)(lm==null?.27:lm.takebackT),drive=(float)(lm==null?.43:lm.driveT),contact=(float)(lm==null?.69:lm.contactT),follow=(float)(lm==null?.93:lm.followT);
+            float loadCenter=(float)(lm!=null&&lm.splitDetected&&!Double.isNaN(lm.splitT)?lm.splitT:Math.max(.08,take*.55));
+            float load=(float)Math.exp(-Math.pow((u-loadCenter)/.095,2));
+            float pelvisDrop=.13f*load;
+            float lateral=.10f*hx;
+            float progress=smooth01((u-take)/Math.max(.08f,contact-take));
+            float followP=smooth01((u-contact)/Math.max(.08f,follow-contact));
+            float twist=(float)Math.toRadians(-32+78*progress+18*followP);
+            float chestTwist=twist*1.18f;
+
+            j[PELVIS]=new P3(lateral,1.02f-pelvisDrop,0);
+            j[SPINE]=j[PELVIS].add(new P3(0,.27f,0));
+            j[CHEST]=j[PELVIS].add(new P3(0,.55f,.02f));
+            j[NECK]=j[PELVIS].add(new P3(0,.76f,.02f));
+            j[HEAD]=j[PELVIS].add(new P3(0,.91f,.03f));
+
+            float shoulderHalf=.23f,hipHalf=.17f;
+            j[LSH]=rotateY(j[CHEST].add(new P3(-shoulderHalf,0,0)),j[CHEST],chestTwist);
+            j[RSH]=rotateY(j[CHEST].add(new P3( shoulderHalf,0,0)),j[CHEST],chestTwist);
+            j[LHIP]=rotateY(j[PELVIS].add(new P3(-hipHalf,0,0)),j[PELVIS],twist*.55f);
+            j[RHIP]=rotateY(j[PELVIS].add(new P3( hipHalf,0,0)),j[PELVIS],twist*.55f);
+
+            float handScale=.52f;
+            P3 measuredHand=new P3(.32f+hx*handScale,1.33f+hy*.54f,hz*.58f+.08f);
+            // Keep the measured path visible but anatomically reachable.
+            P3 rShoulder=j[RSH];
+            P3 hand=limitDistance(rShoulder,measuredHand,.68f);
+            j[RHAND]=hand;j[RWR]=lerp(hand,rShoulder,.08f);
+            j[REL]=elbowPoint(rShoulder,hand,true,u); // inferred IK elbow
+
+            // Non-dominant arm counterbalances the torso.
+            P3 leftHand=j[LSH].add(new P3(-.20f+.10f*progress,-.18f+.10f*followP,.14f-.20f*progress));
+            j[LHAND]=leftHand;j[LWR]=lerp(leftHand,j[LSH],.08f);j[LEL]=elbowPoint(j[LSH],leftHand,false,u);
+
+            // Legs: split/load proxy creates knee flexion and wider base.
+            float stance=.25f+.12f*load;
+            j[LHIP]=j[PELVIS].add(new P3(-.17f,0,0));j[RHIP]=j[PELVIS].add(new P3(.17f,0,0));
+            j[LKNEE]=j[LHIP].add(new P3(-.05f-.05f*load,-.43f+.04f*load,.04f));
+            j[RKNEE]=j[RHIP].add(new P3(.05f+.05f*load,-.43f+.04f*load,-.03f));
+            j[LANK]=new P3(lateral-stance,.08f,-.03f);j[RANK]=new P3(lateral+stance,.08f,.03f);
+            j[LHEEL]=j[LANK].add(new P3(0,-.04f,-.07f));j[RHEEL]=j[RANK].add(new P3(0,-.04f,-.07f));
+            j[LTOE]=j[LANK].add(new P3(0,-.04f,.15f));j[RTOE]=j[RANK].add(new P3(0,-.04f,.15f));
+
+            // Racket follows measured hand-path tangent; this is the strongest measured visual.
+            P3 tangent=measuredTangent(mm,idx).norm();
+            if(tangent.mag()<.01f)tangent=new P3(.2f,.25f,.7f).norm();
+            P3 racketBase=hand;
+            P3 racketTip=racketBase.add(tangent.mul(.55f)).add(new P3(0,.06f,0));
+            j[RACKET_BASE]=racketBase;j[RACKET_TIP]=racketTip;
+
+            if(mirrored)for(int k=0;k<j.length;k++)if(j[k]!=null)j[k]=new P3(-j[k].x,j[k].y,j[k].z);
+            return j;
+        }
+
+        P3 measuredTangent(Metrics mm,int idx){
+            if(mm==null||mm.trace3X==null||mm.trace3X.length<2)return new P3(0,0,1);
+            int a=Math.max(0,idx-1),b=Math.min(mm.trace3X.length-1,idx+1);
+            return new P3(mm.trace3X[b]-mm.trace3X[a],mm.trace3Y[b]-mm.trace3Y[a],mm.trace3Z[b]-mm.trace3Z[a]);
+        }
+
+        P3 elbowPoint(P3 shoulder,P3 hand,boolean dominant,float u){
+            P3 mid=lerp(shoulder,hand,.52f);
+            float side=dominant?.15f:-.13f;
+            float bend=.08f+.10f*(float)Math.sin(Math.PI*clamp(u,0,1));
+            return mid.add(new P3(side,bend,-.04f));
+        }
+
+        P3 limitDistance(P3 from,P3 to,float max){
+            P3 d=to.sub(from);float len=d.mag();return len<=max?to:from.add(d.mul(max/Math.max(.001f,len)));
+        }
+
+        float smooth01(float v){v=(float)clamp(v,0,1);return v*v*(3-2*v);}
+        P3 rotateY(P3 pt,P3 origin,float a){
+            float dx=pt.x-origin.x,dz=pt.z-origin.z;float ca=(float)Math.cos(a),sa=(float)Math.sin(a);
+            return new P3(origin.x+dx*ca+dz*sa,pt.y,origin.z-dx*sa+dz*ca);
+        }
+
+        void drawRig(Canvas c,RectF box,P3[] j,int inferredColor,int measuredColor,boolean current){
+            if(j==null||j[PELVIS]==null)return;
+            int[][] bones={{PELVIS,SPINE},{SPINE,CHEST},{CHEST,NECK},{NECK,HEAD},
+                {CHEST,LSH},{LSH,LEL},{LEL,LWR},{LWR,LHAND},
+                {CHEST,RSH},{RSH,REL},{REL,RWR},{RWR,RHAND},
+                {PELVIS,LHIP},{LHIP,LKNEE},{LKNEE,LANK},{LANK,LHEEL},{LANK,LTOE},
+                {PELVIS,RHIP},{RHIP,RKNEE},{RKNEE,RANK},{RANK,RHEEL},{RANK,RTOE}};
+            p.setStyle(Paint.Style.STROKE);p.setStrokeCap(Paint.Cap.ROUND);p.setStrokeWidth(current?dp(4):dp(2));
+            p.setColor(inferredColor);
+            for(int[] b:bones)bone(c,box,j[b[0]],j[b[1]],p);
+
+            // body joints
+            p.setStyle(Paint.Style.FILL);p.setColor(inferredColor);
+            for(int k=0;k<=RTOE;k++){
+                if(j[k]==null)continue;float[] q=project(j[k],box);c.drawCircle(q[0],q[1],dp(k==HEAD?7:3),p);
+            }
+
+            // measured hand + racket
+            p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(current?dp(6):dp(3));p.setColor(measuredColor);
+            bone(c,box,j[REL],j[RHAND],p);
+            bone(c,box,j[RACKET_BASE],j[RACKET_TIP],p);
+            float[] hand=project(j[RHAND],box),tip=project(j[RACKET_TIP],box);
+            p.setStyle(Paint.Style.FILL);p.setColor(measuredColor);c.drawCircle(hand[0],hand[1],dp(current?6:4),p);
+            p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(current?dp(3):dp(2));c.drawOval(new RectF(tip[0]-dp(13),tip[1]-dp(20),tip[0]+dp(13),tip[1]+dp(20)),p);
+        }
+
+        void bone(Canvas c,RectF box,P3 a,P3 b,Paint pp){
+            if(a==null||b==null)return;float[] q1=project(a,box),q2=project(b,box);c.drawLine(q1[0],q1[1],q2[0],q2[1],pp);
+        }
+
+        void drawTrail(Canvas c,RectF box,Metrics mm,float u){
+            if(mm==null||mm.trace3X==null)return;int n=mm.trace3X.length,end=Math.min(n-1,(int)Math.round(u*(n-1)));
+            if(end<1)return;
+            Path path=new Path();
+            for(int i=0;i<=end;i++){
+                P3 q3=new P3(.32f+mm.trace3X[i]*.52f,1.33f+mm.trace3Y[i]*.54f,mm.trace3Z[i]*.58f+.08f);
+                if(mirrored)q3.x=-q3.x;float[] q=project(q3,box);if(i==0)path.moveTo(q[0],q[1]);else path.lineTo(q[0],q[1]);
+            }
+            p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(dp(3));p.setStrokeCap(Paint.Cap.ROUND);p.setColor(Color.argb(150,216,255,87));c.drawPath(path,p);
+        }
+
+        String phaseName(Metrics mm,float u){
+            if(mm==null||mm.lm==null)return "NO SWING";
+            Landmarks l=mm.lm;
+            if(l.splitDetected&&!Double.isNaN(l.splitT)&&u<l.takebackT&&Math.abs(u-l.splitT)<.08)return "SPLIT / LOAD";
+            if(u<l.takebackT)return "READY";
+            if(u<l.driveT)return "TAKEBACK";
+            if(u<l.contactT)return "DRIVE";
+            if(Math.abs(u-l.contactT)<.055)return "VIRTUAL CONTACT";
+            if(u<l.followT)return "FOLLOW-THROUGH";
+            return "FINISH / RESET";
+        }
+
+        float[] project(P3 q,RectF box){
+            float x=q.x,y=q.y,z=q.z;if(mirrored)x=-x; // view mirror
+            if(!view3D){
+                float scale=Math.min(box.width()*.72f,box.height()*.58f);
+                return new float[]{box.centerX()+x*scale+z*scale*.16f,box.bottom-dp(38)-y*scale*.76f};
+            }
+            double cy=Math.cos(yaw),sy=Math.sin(yaw);double x1=x*cy+z*sy,z1=-x*sy+z*cy;
+            double cp=Math.cos(pitch),sp=Math.sin(pitch);double y1=y*cp-z1*sp,z2=y*sp+z1*cp;
+            double persp=1.0/(1.0+z2*.18);float scale=Math.min(box.width(),box.height())*.36f;
+            return new float[]{(float)(box.centerX()+x1*scale*persp),(float)(box.bottom-dp(34)-y1*scale*.76f*persp)};
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent e){
+            if(!view3D)return true;
+            if(e.getAction()==MotionEvent.ACTION_DOWN){touchX=e.getX();touchY=e.getY();lastTouchX=touchX;rotating=false;return true;}
+            if(e.getAction()==MotionEvent.ACTION_MOVE){
+                float totalX=e.getX()-touchX,totalY=e.getY()-touchY,dx=e.getX()-lastTouchX;
+                if(!rotating&&Math.abs(totalX)>dp(8)&&Math.abs(totalX)>Math.abs(totalY)*1.15f){rotating=true;getParent().requestDisallowInterceptTouchEvent(true);}
+                if(rotating){yaw+=dx*.012f;lastTouchX=e.getX();invalidate();return true;}
+                return true;
+            }
+            if(e.getAction()==MotionEvent.ACTION_UP||e.getAction()==MotionEvent.ACTION_CANCEL){getParent().requestDisallowInterceptTouchEvent(false);rotating=false;return true;}
+            return true;
+        }
+    }
+
+    static class P3{
+        float x,y,z;P3(float X,float Y,float Z){x=X;y=Y;z=Z;}
+        P3 add(P3 o){return new P3(x+o.x,y+o.y,z+o.z);}
+        P3 sub(P3 o){return new P3(x-o.x,y-o.y,z-o.z);}
+        P3 mul(float s){return new P3(x*s,y*s,z*s);}
+        float mag(){return (float)Math.sqrt(x*x+y*y+z*z);}
+        P3 norm(){float m=mag();return m<1e-5?new P3(0,0,0):mul(1f/m);}
+    }
+
+    P3 lerp(P3 a,P3 b,float t){return a.mul(1-t).add(b.mul(t));}
 
     class Motion3DView extends View{
         Paint p=new Paint(1);
